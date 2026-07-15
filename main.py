@@ -44,15 +44,15 @@ class DaidaiManagerPlugin(Star):
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "api"):
         """
         通用 API 调用，自动添加 Authorization
-        :param prefix: "api" 使用 /api/v1 前缀；"ai" 使用 /ai 前缀
+        prefix: "ai" -> /ai, "apiv1" -> /api/v1, "api" -> /api
         """
         token = await self._get_token()
         if prefix == "ai":
-            # 从 base_url 中提取主机和端口，然后拼上 /ai
-            # 例如 http://192.168.5.1:5777/api/v1 -> http://192.168.5.1:5777/ai
             base = self.base_url.replace("/api/v1", "") + "/ai"
-        else:
-            base = self.base_url  # 默认 /api/v1
+        elif prefix == "apiv1":
+            base = self.base_url  # /api/v1
+        else:  # "api"
+            base = self.base_url.replace("/api/v1", "") + "/api"
         url = f"{base}/{endpoint.lstrip('/')}"
         headers = {
             "Content-Type": "application/json",
@@ -73,23 +73,39 @@ class DaidaiManagerPlugin(Star):
                 return await resp.json()
 
     async def _get_task_id_by_name(self, task_name: str) -> int:
-        """根据任务名称获取任务 ID（精确匹配）"""
-        # 使用 /ai 前缀获取任务列表
-        result = await self._call_api("tasks?page=1&page_size=100", method="GET", prefix="ai")
-        tasks = result.get("data", [])
-        if not tasks:
-            raise Exception("未获取到任务列表")
-        for task in tasks:
-            if task.get("name") == task_name:
-                return task.get("id")
-        raise Exception(f"未找到名称为 '{task_name}' 的任务")
+        """根据任务名称获取任务 ID（精确匹配），尝试多个端点"""
+        endpoints = [
+            ("tasks?page=1&page_size=100", "ai"),
+            ("tasks?page=1&page_size=100", "api"),
+            ("tasks?page=1&page_size=100", "apiv1"),
+        ]
+        for endpoint, prefix in endpoints:
+            try:
+                result = await self._call_api(endpoint, method="GET", prefix=prefix)
+                logger.info(f"尝试 {prefix} 端点，响应: {result}")
+                # 提取 tasks 列表
+                tasks = result.get("data")
+                if tasks is None:
+                    # 可能数据在 data 的 items 或 list 中
+                    if isinstance(result.get("data"), dict):
+                        tasks = result["data"].get("items") or result["data"].get("list")
+                if tasks and isinstance(tasks, list) and len(tasks) > 0:
+                    for task in tasks:
+                        if task.get("name") == task_name:
+                            return task.get("id")
+                    # 如果列表存在但未匹配，继续下一个端点
+                    continue
+            except Exception as e:
+                logger.warning(f"尝试 {prefix} 端点失败: {e}")
+                continue
+        raise Exception(f"在所有端点中均未找到名称为 '{task_name}' 的任务")
 
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
         '''运行呆呆面板中的脚本：/运行脚本 脚本路径（如 /root/test.sh）'''
         try:
             payload = {"path": script_path}
-            result = await self._call_api("scripts/run", data=payload, prefix="api")
+            result = await self._call_api("scripts/run", data=payload, prefix="apiv1")
             logger.info(f"运行脚本响应: {result}")
 
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
@@ -105,11 +121,9 @@ class DaidaiManagerPlugin(Star):
     async def run_task(self, event: AstrMessageEvent, task_name: str):
         '''运行呆呆面板中的定时任务：/运行任务 任务名称（如 "酷我验证码处理"）'''
         try:
-            # 1. 根据名称获取任务 ID
             task_id = await self._get_task_id_by_name(task_name)
             logger.info(f"任务 '{task_name}' 对应的 ID 为 {task_id}")
 
-            # 2. 使用 /ai 前缀 + PUT 方法运行任务
             result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={}, prefix="ai")
             logger.info(f"运行任务响应: {result}")
 
