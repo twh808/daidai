@@ -1,5 +1,6 @@
 import aiohttp
 import time
+from urllib.parse import urljoin
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
@@ -43,11 +44,14 @@ class DaidaiManagerPlugin(Star):
 
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "apiv1"):
         token = await self._get_token()
+        # 构建基础 URL
         if prefix == "ai":
-            base = self.base_url.replace("/api/v1", "") + "/ai"
-        else:  # "apiv1"
-            base = self.base_url
-        url = f"{base}/{endpoint.lstrip('/')}"
+            # 去掉 /api/v1 和 /api，然后拼接 /ai
+            base = self.base_url.replace("/api/v1", "").replace("/api", "").rstrip('/') + "/ai"
+        else:
+            base = self.base_url.rstrip('/')
+        # 使用 urljoin 正确拼接
+        url = urljoin(base + '/', endpoint.lstrip('/'))
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
@@ -88,12 +92,9 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
-        '''运行呆呆面板中的脚本：/运行脚本 脚本路径（如 /root/test.sh）'''
         try:
             payload = {"path": script_path}
             result = await self._call_api("scripts/run", data=payload, prefix="apiv1")
-            logger.info(f"运行脚本响应: {result}")
-
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                 error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                 yield event.plain_result(f"❌ 运行失败：{error_msg}")
@@ -105,14 +106,10 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
-        '''运行呆呆面板中的定时任务：/运行任务 任务名称（如 "酷我验证码处理"）'''
         try:
             task_id = await self._get_task_id_by_name(task_name)
             logger.info(f"任务 '{task_name}' 对应的 ID 为 {task_id}")
-
             result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={}, prefix="ai")
-            logger.info(f"运行任务响应: {result}")
-
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                 error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                 yield event.plain_result(f"❌ 运行任务失败：{error_msg}")
@@ -128,7 +125,6 @@ class DaidaiManagerPlugin(Star):
     @filter.command("envs")
     @filter.command("变量")
     async def list_envs(self, event: AstrMessageEvent):
-        '''获取呆呆面板中的所有环境变量：支持 /环境变量列表、/变量列表、/envs、/变量 等'''
         try:
             result = await self._call_api("envs?page=1&page_size=100", method="GET", prefix="apiv1")
             envs = result.get("data", [])
@@ -150,18 +146,10 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("修改环境变量")
     async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        '''修改环境变量的值：/修改环境变量 变量名 新值'''
         try:
             env_id = await self._get_env_id_by_name(env_name)
-            logger.info(f"环境变量 '{env_name}' 对应的 ID 为 {env_id}")
-
-            payload = {
-                "name": env_name,
-                "value": new_value
-            }
+            payload = {"name": env_name, "value": new_value}
             result = await self._call_api(f"envs/{env_id}", method="PUT", data=payload, prefix="apiv1")
-            logger.info(f"修改环境变量响应: {result}")
-
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                 error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                 yield event.plain_result(f"❌ 修改失败：{error_msg}")
