@@ -69,16 +69,20 @@ class DaidaiManagerPlugin(Star):
         try:
             payload = {"path": script_path}
             result = await self._call_api("/scripts/run", data=payload)
-            # 根据实际响应格式调整判断逻辑
-            if result.get("status") == "success" or result.get("code") == 0:
+            logger.info(f"运行脚本响应: {result}")
+
+            # 判断是否出现明确错误
+            if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
+                error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
+                yield event.plain_result(f"❌ 运行失败：{error_msg}")
+            else:
+                # 无错误，视为成功
                 run_id = result.get("data", {}).get("run_id")
                 if run_id:
                     yield event.plain_result(f"✅ 脚本已提交运行！运行ID：{run_id}")
                 else:
-                    yield event.plain_result(f"✅ 运行成功，但未返回 run_id")
-            else:
-                error_msg = result.get("msg") or result.get("message") or str(result)
-                yield event.plain_result(f"❌ 运行失败：{error_msg}")
+                    # 如果没返回 run_id 但也没有错误，说明可能直接执行完成了
+                    yield event.plain_result(f"✅ 脚本已成功执行（无运行ID返回）")
         except Exception as e:
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
