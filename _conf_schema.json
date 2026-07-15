@@ -2,7 +2,7 @@
   "base_url": {
     "description": "呆呆面板 API 地址",
     "type": "string",
-    "default": "http://192.168.5.1:5777/api"
+    "default": "http://192.168.5.1:5777/api/v1"
   },
   "app_key": {
     "description": "呆呆面板的 App Key",
