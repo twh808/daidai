@@ -42,15 +42,11 @@ class DaidaiManagerPlugin(Star):
                 return token
 
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "apiv1"):
-        """
-        通用 API 调用，自动添加 Authorization
-        prefix: "ai" -> /ai, "apiv1" -> /api/v1
-        """
         token = await self._get_token()
         if prefix == "ai":
             base = self.base_url.replace("/api/v1", "") + "/ai"
         else:  # "apiv1"
-            base = self.base_url  # /api/v1
+            base = self.base_url
         url = f"{base}/{endpoint.lstrip('/')}"
         headers = {
             "Content-Type": "application/json",
@@ -71,7 +67,6 @@ class DaidaiManagerPlugin(Star):
                 return await resp.json()
 
     async def _get_task_id_by_name(self, task_name: str) -> int:
-        """根据任务名称获取任务 ID（精确匹配）"""
         result = await self._call_api("tasks?page=1&page_size=100", method="GET", prefix="apiv1")
         tasks = result.get("data")
         if not tasks or not isinstance(tasks, list):
@@ -82,7 +77,6 @@ class DaidaiManagerPlugin(Star):
         raise Exception(f"未找到名称为 '{task_name}' 的任务")
 
     async def _get_env_id_by_name(self, env_name: str) -> int:
-        """根据环境变量名称获取 ID（精确匹配）"""
         result = await self._call_api("envs?page=1&page_size=100", method="GET", prefix="apiv1")
         envs = result.get("data")
         if not envs or not isinstance(envs, list):
@@ -128,8 +122,11 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # 新增 aliases，支持多种短指令
-    @filter.command("环境变量列表", aliases=["变量列表", "env列表", "envs", "变量"])
+    @filter.command("环境变量列表")
+    @filter.command("变量列表")
+    @filter.command("env列表")
+    @filter.command("envs")
+    @filter.command("变量")
     async def list_envs(self, event: AstrMessageEvent):
         '''获取呆呆面板中的所有环境变量：支持 /环境变量列表、/变量列表、/envs、/变量 等'''
         try:
