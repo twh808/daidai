@@ -41,21 +41,25 @@ class DaidaiManagerPlugin(Star):
                 self.token = token
                 return token
 
-    async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, use_v1_prefix: bool = True):
-        """通用 API 调用，自动添加 Authorization"""
+    async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "api"):
+        """
+        通用 API 调用，自动添加 Authorization
+        :param prefix: "api" 使用 /api/v1 前缀；"ai" 使用 /ai 前缀
+        """
         token = await self._get_token()
-        # 如果 use_v1_prefix 为 True，使用 base_url（带 /v1），否则使用不带 v1 的基础地址
-        if use_v1_prefix:
-            base = self.base_url
+        if prefix == "ai":
+            # 从 base_url 中提取主机和端口，然后拼上 /ai
+            # 例如 http://192.168.5.1:5777/api/v1 -> http://192.168.5.1:5777/ai
+            base = self.base_url.replace("/api/v1", "") + "/ai"
         else:
-            # 从 base_url 中去掉 /v1，得到 http://192.168.5.1:5777/api
-            base = self.base_url.replace("/v1", "")
+            base = self.base_url  # 默认 /api/v1
         url = f"{base}/{endpoint.lstrip('/')}"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
         }
         logger.info(f"请求 URL: {url}")
+        logger.info(f"请求方法: {method}")
         logger.info(f"请求体: {data}")
         async with aiohttp.ClientSession() as session:
             async with session.request(method, url, headers=headers, json=data) as resp:
@@ -65,17 +69,16 @@ class DaidaiManagerPlugin(Star):
                 if resp.status == 401:
                     self.token = None
                     self.token_expiry = 0
-                    return await self._call_api(endpoint, method, data, use_v1_prefix)
+                    return await self._call_api(endpoint, method, data, prefix)
                 return await resp.json()
 
     async def _get_task_id_by_name(self, task_name: str) -> int:
         """根据任务名称获取任务 ID（精确匹配）"""
-        # 获取任务列表（不带 v1 前缀）
-        result = await self._call_api("tasks?page=1&page_size=100", method="GET", use_v1_prefix=False)
+        # 使用 /ai 前缀获取任务列表
+        result = await self._call_api("tasks?page=1&page_size=100", method="GET", prefix="ai")
         tasks = result.get("data", [])
         if not tasks:
             raise Exception("未获取到任务列表")
-        # 精确匹配
         for task in tasks:
             if task.get("name") == task_name:
                 return task.get("id")
@@ -86,7 +89,7 @@ class DaidaiManagerPlugin(Star):
         '''运行呆呆面板中的脚本：/运行脚本 脚本路径（如 /root/test.sh）'''
         try:
             payload = {"path": script_path}
-            result = await self._call_api("scripts/run", data=payload)
+            result = await self._call_api("scripts/run", data=payload, prefix="api")
             logger.info(f"运行脚本响应: {result}")
 
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
@@ -106,22 +109,8 @@ class DaidaiManagerPlugin(Star):
             task_id = await self._get_task_id_by_name(task_name)
             logger.info(f"任务 '{task_name}' 对应的 ID 为 {task_id}")
 
-            # 2. 尝试运行任务（尝试多种端点）
-            # 方式1: POST /v1/tasks/{id}/run（带 v1）
-            result = await self._call_api(f"tasks/{task_id}/run", method="POST", data={}, use_v1_prefix=True)
-            if result.get("code") == 404 or result.get("error") == "Not Found":
-                # 方式2: POST /tasks/{id}/run（不带 v1）
-                result = await self._call_api(f"tasks/{task_id}/run", method="POST", data={}, use_v1_prefix=False)
-            if result.get("code") == 404 or result.get("error") == "Not Found":
-                # 方式3: POST /v1/tasks/run（带 body）
-                result = await self._call_api("tasks/run", method="POST", data={"id": task_id}, use_v1_prefix=True)
-            if result.get("code") == 404 or result.get("error") == "Not Found":
-                # 方式4: POST /tasks/run（不带 v1）
-                result = await self._call_api("tasks/run", method="POST", data={"id": task_id}, use_v1_prefix=False)
-            if result.get("code") == 404 or result.get("error") == "Not Found":
-                # 方式5: POST /v1/tasks/{id}/start
-                result = await self._call_api(f"tasks/{task_id}/start", method="POST", data={}, use_v1_prefix=True)
-
+            # 2. 使用 /ai 前缀 + PUT 方法运行任务
+            result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={}, prefix="ai")
             logger.info(f"运行任务响应: {result}")
 
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
