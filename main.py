@@ -41,10 +41,17 @@ class DaidaiManagerPlugin(Star):
                 self.token = token
                 return token
 
-    async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None):
-        """统一使用 /api/v1 前缀"""
+    async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "apiv1"):
+        """
+        通用 API 调用，自动添加 Authorization
+        prefix: "ai" -> /ai, "apiv1" -> /api/v1
+        """
         token = await self._get_token()
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        if prefix == "ai":
+            base = self.base_url.replace("/api/v1", "") + "/ai"
+        else:  # "apiv1"
+            base = self.base_url  # /api/v1
+        url = f"{base}/{endpoint.lstrip('/')}"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
@@ -60,15 +67,12 @@ class DaidaiManagerPlugin(Star):
                 if resp.status == 401:
                     self.token = None
                     self.token_expiry = 0
-                    return await self._call_api(endpoint, method, data)
-                try:
-                    return await resp.json()
-                except:
-                    return {"status": resp.status, "text": response_text}
+                    return await self._call_api(endpoint, method, data, prefix)
+                return await resp.json()
 
     async def _get_task_id_by_name(self, task_name: str) -> int:
-        """根据任务名称获取任务 ID（精确匹配），使用 /api/v1/tasks"""
-        result = await self._call_api("tasks?page=1&page_size=100", method="GET")
+        """根据任务名称获取任务 ID（精确匹配）"""
+        result = await self._call_api("tasks?page=1&page_size=100", method="GET", prefix="apiv1")
         tasks = result.get("data")
         if not tasks or not isinstance(tasks, list):
             raise Exception("获取任务列表失败，响应格式异常")
@@ -77,12 +81,23 @@ class DaidaiManagerPlugin(Star):
                 return task.get("id")
         raise Exception(f"未找到名称为 '{task_name}' 的任务")
 
+    async def _get_env_id_by_name(self, env_name: str) -> int:
+        """根据环境变量名称获取 ID（精确匹配）"""
+        result = await self._call_api("envs?page=1&page_size=100", method="GET", prefix="apiv1")
+        envs = result.get("data")
+        if not envs or not isinstance(envs, list):
+            raise Exception("获取环境变量列表失败，响应格式异常")
+        for env in envs:
+            if env.get("name") == env_name:
+                return env.get("id")
+        raise Exception(f"未找到名称为 '{env_name}' 的环境变量")
+
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
         '''运行呆呆面板中的脚本：/运行脚本 脚本路径（如 /root/test.sh）'''
         try:
             payload = {"path": script_path}
-            result = await self._call_api("scripts/run", data=payload)
+            result = await self._call_api("scripts/run", data=payload, prefix="apiv1")
             logger.info(f"运行脚本响应: {result}")
 
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
@@ -101,17 +116,60 @@ class DaidaiManagerPlugin(Star):
             task_id = await self._get_task_id_by_name(task_name)
             logger.info(f"任务 '{task_name}' 对应的 ID 为 {task_id}")
 
-            result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={})
+            result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={}, prefix="ai")
             logger.info(f"运行任务响应: {result}")
 
-            # 判断成功：没有错误字段，或 message 字段存在，或状态码为200且无错误
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                 error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                 yield event.plain_result(f"❌ 运行任务失败：{error_msg}")
             else:
-                # 成功时可能有 message 字段
-                message = result.get("message", "任务已启动")
-                yield event.plain_result(f"✅ {message}")
+                yield event.plain_result(f"✅ 任务 '{task_name}' 已成功运行！")
         except Exception as e:
             logger.error(f"调用呆呆面板API失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    # 新增 aliases，支持多种短指令
+    @filter.command("环境变量列表", aliases=["变量列表", "env列表", "envs", "变量"])
+    async def list_envs(self, event: AstrMessageEvent):
+        '''获取呆呆面板中的所有环境变量：支持 /环境变量列表、/变量列表、/envs、/变量 等'''
+        try:
+            result = await self._call_api("envs?page=1&page_size=100", method="GET", prefix="apiv1")
+            envs = result.get("data", [])
+            if not envs:
+                yield event.plain_result("📭 当前没有环境变量")
+            else:
+                msg = "📋 环境变量列表：\n"
+                for env in envs:
+                    name = env.get("name", "未命名")
+                    value = env.get("value", "")
+                    group = env.get("group", "默认分组")
+                    remarks = env.get("remarks", "")
+                    remarks_str = f" ({remarks})" if remarks else ""
+                    msg += f"- ID: {env.get('id')} | {name} = {value} | 分组: {group}{remarks_str}\n"
+                yield event.plain_result(msg)
+        except Exception as e:
+            logger.error(f"获取环境变量列表失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    @filter.command("修改环境变量")
+    async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
+        '''修改环境变量的值：/修改环境变量 变量名 新值'''
+        try:
+            env_id = await self._get_env_id_by_name(env_name)
+            logger.info(f"环境变量 '{env_name}' 对应的 ID 为 {env_id}")
+
+            payload = {
+                "name": env_name,
+                "value": new_value
+            }
+            result = await self._call_api(f"envs/{env_id}", method="PUT", data=payload, prefix="apiv1")
+            logger.info(f"修改环境变量响应: {result}")
+
+            if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
+                error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
+                yield event.plain_result(f"❌ 修改失败：{error_msg}")
+            else:
+                yield event.plain_result(f"✅ 环境变量 '{env_name}' 已成功更新为 '{new_value}'！")
+        except Exception as e:
+            logger.error(f"修改环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
