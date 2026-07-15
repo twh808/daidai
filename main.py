@@ -43,14 +43,15 @@ class DaidaiManagerPlugin(Star):
                 return token
 
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None, prefix: str = "apiv1"):
+        """通用 API 调用，自动添加 Authorization，正确处理 URL 拼接"""
         token = await self._get_token()
         # 构建基础 URL
         if prefix == "ai":
-            # 去掉 /api/v1 和 /api，然后拼接 /ai
+            # 去掉 /api/v1 或 /api，然后拼接 /ai
             base = self.base_url.replace("/api/v1", "").replace("/api", "").rstrip('/') + "/ai"
         else:
             base = self.base_url.rstrip('/')
-        # 使用 urljoin 正确拼接
+        # 使用 urljoin 确保正确拼接，避免双斜杠
         url = urljoin(base + '/', endpoint.lstrip('/'))
         headers = {
             "Content-Type": "application/json",
@@ -64,11 +65,17 @@ class DaidaiManagerPlugin(Star):
                 response_text = await resp.text()
                 logger.info(f"响应状态码: {resp.status}")
                 logger.info(f"响应内容: {response_text}")
+                # 如果返回 401，重新获取 token 并重试
                 if resp.status == 401:
                     self.token = None
                     self.token_expiry = 0
                     return await self._call_api(endpoint, method, data, prefix)
-                return await resp.json()
+                # 尝试解析 JSON，失败则封装为错误
+                try:
+                    return await resp.json()
+                except:
+                    # 非 JSON 响应，封装为错误对象
+                    return {"error": f"HTTP {resp.status}", "detail": response_text}
 
     async def _get_task_id_by_name(self, task_name: str) -> int:
         result = await self._call_api("tasks?page=1&page_size=100", method="GET", prefix="apiv1")
@@ -109,7 +116,14 @@ class DaidaiManagerPlugin(Star):
         try:
             task_id = await self._get_task_id_by_name(task_name)
             logger.info(f"任务 '{task_name}' 对应的 ID 为 {task_id}")
+
+            # 先尝试 PUT
             result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={}, prefix="ai")
+            # 如果 405，尝试 POST
+            if result.get("error") and "405" in str(result.get("error", "")):
+                logger.info("PUT 返回 405，尝试 POST")
+                result = await self._call_api(f"tasks/{task_id}/run", method="POST", data={}, prefix="ai")
+
             if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                 error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                 yield event.plain_result(f"❌ 运行任务失败：{error_msg}")
