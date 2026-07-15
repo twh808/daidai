@@ -7,11 +7,13 @@
   "app_key": {
     "description": "呆呆面板的 App Key",
     "type": "string",
+    "is_sensitive": true,
     "hint": "在呆呆面板后台 -> 系统设置 -> Open API 中获取"
   },
   "app_secret": {
     "description": "呆呆面板的 App Secret",
     "type": "string",
+    "is_sensitive": true,
     "hint": "在呆呆面板后台 -> 系统设置 -> Open API 中获取"
   }
 }
