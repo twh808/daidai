@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（修复更新版）")
+        logger.info("✅ 呆呆面板插件已加载（修正版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -97,10 +97,9 @@ class DaidaiManagerPlugin(Star):
             return False
         return True
 
-    # ---------- 新增：支持账号#值格式的账户更新 ----------
+    # ---------- 账户更新模式 ----------
     async def _update_env_account(self, env_name: str, account: str, new_value: str, event):
         env_id = await self._get_env_id_by_name(env_name)
-        # 如果变量不存在，创建
         if env_id is None:
             initial = f"{account}#{new_value}"
             if await self._create_env(env_name, initial):
@@ -109,7 +108,6 @@ class DaidaiManagerPlugin(Star):
                 yield event.plain_result(f"❌ 创建环境变量 '{env_name}' 失败")
             return
 
-        # 获取当前值
         envs = await self._fetch_env_list()
         current_value = None
         for env in envs:
@@ -120,17 +118,13 @@ class DaidaiManagerPlugin(Star):
             yield event.plain_result("❌ 未找到该环境变量的当前值")
             return
 
-        # 处理账号更新逻辑（支持 & 或换行分隔）
         separators = ['&', '\n']
-        # 检测分隔符
         has_sep = any(sep in current_value for sep in separators)
 
         if not has_sep:
-            # 无分隔符，可能是单个账号
             if '#' in current_value:
                 parts = current_value.split('#', 1)
                 if parts[0] == account:
-                    # 更新该账号的值
                     new_val = f"{account}#{new_value}"
                     if await self._update_env(env_id, env_name, new_val):
                         yield event.plain_result(f"✅ 环境变量 '{env_name}' 中账号 '{account}' 已更新为 '{new_value}'")
@@ -138,7 +132,6 @@ class DaidaiManagerPlugin(Star):
                         yield event.plain_result(f"❌ 更新失败")
                     return
                 else:
-                    # 不同账号，追加
                     new_val = current_value + "&" + f"{account}#{new_value}"
                     if await self._update_env(env_id, env_name, new_val):
                         yield event.plain_result(f"✅ 环境变量 '{env_name}' 已添加账号 '{account}' 为 '{new_value}'")
@@ -146,11 +139,9 @@ class DaidaiManagerPlugin(Star):
                         yield event.plain_result(f"❌ 更新失败")
                     return
             else:
-                # 既无分隔符也无#，视为普通值，提示使用覆盖模式
                 yield event.plain_result(f"❌ 当前值不是账号格式，请使用覆盖模式：/更新环境变量 {env_name} <新值>")
                 return
         else:
-            # 有分隔符，按分隔符拆分
             if '&' in current_value:
                 items = current_value.split('&')
             else:
@@ -300,21 +291,15 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 更新环境变量指令（修复后） ----------
+    # ---------- 更新环境变量指令（修正参数） ----------
     @filter.command("更新环境变量")
-    async def update_env(self, event: AstrMessageEvent, *args):
+    async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
         '''
         用法：
         /更新环境变量 <变量名> <新值>
         如果新值包含 '#'，则按账号更新（格式：账号#新值），否则覆盖整个变量
         '''
-        if len(args) < 2:
-            yield event.plain_result("❌ 用法：/更新环境变量 <变量名> <新值>")
-            return
-        env_name = args[0]
-        new_value = args[1]  # 只取第一个参数作为新值，忽略后续多余参数
         if '#' in new_value:
-            # 按账号更新
             parts = new_value.split('#', 1)
             account = parts[0].strip()
             value = parts[1].strip() if len(parts) > 1 else ''
