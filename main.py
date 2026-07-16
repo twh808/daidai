@@ -10,19 +10,25 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        self.base_url = config.get("base_url", "http://127.0.0.1:5777/api/v1")
+        # 默认地址改为通用占位符，实际使用时在插件配置中填写
+        self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
         self.app_key = config.get("app_key", "")
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（增加 /更新变量）")
+        logger.info("✅ 呆呆面板插件已加载（修复token地址）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
         if self.token and self.token_expiry > time.time():
             return self.token
 
-        token_url = f"http://127.0.0.1:5777/api/open-api/token"
+        # ========== 修复：从 base_url 动态构造 token 地址 ==========
+        # 去掉 /api/v1 或 /api 后缀，得到基础地址
+        base = self.base_url.replace("/api/v1", "").replace("/api", "")
+        token_url = f"{base}/api/open-api/token"
+        # =====================================================
+
         payload = {
             "app_key": self.app_key,
             "app_secret": self.app_secret
