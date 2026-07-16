@@ -15,9 +15,9 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
+        # 交互会话存储
+        self.sessions = {}
         logger.info("✅ 呆呆面板插件已加载（增加 /更新变量）")
-        # ========== 新增：交互会话存储 ==========
-        self.sessions = {}  # { user_id: {'action': 'update'|'script'|'task', 'step': '...', 'env_name': ...} }
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -470,11 +470,11 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ==================== 新增内容开始 ====================
+    # ==================== 新增内容 ====================
     # ---------- 交互式会话处理 ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
-        """处理交互式输入，返回消息字符串或 None"""
-        user_id = str(event.get_sender_id())
+        """处理交互输入，返回消息字符串或 None"""
+        user_id = str(event.get_user_id())
         if user_id not in self.sessions:
             return None
 
@@ -589,15 +589,16 @@ class DaidaiManagerPlugin(Star):
         del self.sessions[user_id]
         return "❌ 未知交互操作，已取消"
 
-    # ---------- 重写 on_message 方法（无装饰器，用于捕获普通消息） ----------
+    # ---------- 重写 on_message 方法（用于捕获普通消息） ----------
     async def on_message(self, event: AstrMessageEvent):
         """拦截非指令消息，用于交互式会话"""
-        user_id = str(event.get_sender_id())
+        user_id = str(event.get_user_id())
         if user_id in self.sessions:
             result = await self._handle_interactive_input(event)
             if result is not None:
                 yield event.plain_result(result)
-            return  # 已处理，不再向下传递
+            # 无论是否处理，都直接返回，不再传递给其他处理器
+            return
 
     # ---------- 新增：/菜单 和 /menu 指令 ----------
     @filter.command("菜单")
@@ -651,7 +652,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互更新")
     async def interactive_update(self, event: AstrMessageEvent):
         """交互式更新环境变量，逐步引导输入变量名和新值"""
-        user_id = str(event.get_sender_id())
+        user_id = str(event.get_user_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -661,7 +662,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互脚本")
     async def interactive_script(self, event: AstrMessageEvent):
         """交互式运行脚本，引导输入脚本路径"""
-        user_id = str(event.get_sender_id())
+        user_id = str(event.get_user_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -671,7 +672,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互任务")
     async def interactive_task(self, event: AstrMessageEvent):
         """交互式运行任务，引导输入任务名称"""
-        user_id = str(event.get_sender_id())
+        user_id = str(event.get_user_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
