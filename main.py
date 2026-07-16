@@ -306,11 +306,11 @@ class DaidaiManagerPlugin(Star):
 
         单账户更新（包含 #）：
           /更新环境变量 <变量名> <账号#新值>
-          示例：/更新环境变量 CODE 15507099836#16487
+          示例：/更新环境变量 CODE 155********#16487
 
         多账户更新（& 分隔）：
           /更新环境变量 <变量名> <账号1#值1&账号2#值2&...>
-          示例：/更新环境变量 CODE 15507099836#16487&18870799391#093236
+          示例：/更新环境变量 CODE 155********#16487&155********#093236
         """
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
@@ -373,11 +373,11 @@ class DaidaiManagerPlugin(Star):
 
         单账户更新（包含 #）：
           /更新变量 <变量名> <账号#新值>
-          示例：/更新变量 CODE 15507099836#16487
+          示例：/更新变量 CODE 155********#16487
 
         多账户更新（& 分隔）：
           /更新变量 <变量名> <账号1#值1&账号2#值2&...>
-          示例：/更新变量 CODE 15507099836#16487&18870799391#093236
+          示例：/更新变量 CODE 155********#16487&155********#093236
         """
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
@@ -477,7 +477,7 @@ class DaidaiManagerPlugin(Star):
     # ---------- 交互会话处理 ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
         """处理交互式会话中的用户输入，返回消息字符串或 None"""
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())  # 修复：使用 get_sender_id
         if user_id not in self.sessions:
             return None
 
@@ -595,13 +595,12 @@ class DaidaiManagerPlugin(Star):
     # ---------- 重写 on_message 方法（无装饰器） ----------
     async def on_message(self, event: AstrMessageEvent):
         """拦截普通消息，用于交互式会话"""
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())  # 修复：使用 get_sender_id
         if user_id in self.sessions:
             result = await self._handle_interactive_input(event)
             if result is not None:
                 yield event.plain_result(result)
             # 已处理，不继续传递
-            return
 
     # ---------- 新增 /菜单 指令 ----------
     @filter.command("菜单")
@@ -655,7 +654,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互更新")
     async def interactive_update(self, event: AstrMessageEvent):
         """交互式更新环境变量，逐步引导输入变量名和新值"""
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())  # 修复：使用 get_sender_id
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -665,7 +664,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互脚本")
     async def interactive_script(self, event: AstrMessageEvent):
         """交互式运行脚本，引导输入脚本路径"""
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())  # 修复：使用 get_sender_id
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -675,7 +674,7 @@ class DaidaiManagerPlugin(Star):
     @filter.command("交互任务")
     async def interactive_task(self, event: AstrMessageEvent):
         """交互式运行任务，引导输入任务名称"""
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())  # 修复：使用 get_sender_id
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
