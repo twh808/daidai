@@ -5,6 +5,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
 
+# ==================== 原有插件（一字不改） ====================
 class DaidaiManagerPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -15,8 +16,6 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        # 交互会话存储
-        self.sessions = {}
         logger.info("✅ 呆呆面板插件已加载（增加 /更新变量）")
 
     # ---------- Token 管理 ----------
@@ -181,7 +180,7 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ========== 原有指令（完全不变） ==========
+    # ========== 原有指令 ==========
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         """查看呆呆面板中的所有环境变量列表"""
@@ -470,10 +469,24 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ==================== 新增内容 ====================
+
+# ==================== 新增独立交互插件（与原有插件完全隔离） ====================
+class InteractivePlugin(Star):
+    def __init__(self, context: Context, config: dict = None):
+        super().__init__(context)
+        self.sessions = {}  # 交互会话存储
+        # 获取原始插件的实例（通过context获取）
+        self.main_plugin = None
+        for plugin in context.stars:  # AstrBot中context.stars包含所有已加载的Star实例
+            if isinstance(plugin, DaidaiManagerPlugin):
+                self.main_plugin = plugin
+                break
+        if not self.main_plugin:
+            logger.warning("未找到 DaidaiManagerPlugin 实例，交互功能将无法使用主插件的API")
+        logger.info("✅ 交互式插件已加载")
+
     # ---------- 交互式会话处理 ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
-        """处理交互输入，返回消息字符串或 None"""
         user_id = str(event.get_user_id())
         if user_id not in self.sessions:
             return None
@@ -486,6 +499,10 @@ class DaidaiManagerPlugin(Star):
         if content == '/取消':
             del self.sessions[user_id]
             return "🔄 已取消当前交互操作"
+
+        if not self.main_plugin:
+            del self.sessions[user_id]
+            return "❌ 主插件未加载，无法执行操作"
 
         if action == 'update':
             if step == 'env_name':
@@ -515,7 +532,7 @@ class DaidaiManagerPlugin(Star):
                             else:
                                 return f"❌ 格式错误：'{part}' 缺少 # 分隔符"
                         if accounts:
-                            msg, count = await self._update_env_accounts(env_name, accounts)
+                            msg, count = await self.main_plugin._update_env_accounts(env_name, accounts)
                             return f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
                         else:
                             return "❌ 未检测到有效的账户更新条目"
@@ -525,12 +542,12 @@ class DaidaiManagerPlugin(Star):
                             acc = acc_val[0].strip()
                             val = acc_val[1].strip() if len(acc_val) > 1 else ''
                             if acc and val:
-                                msg, count = await self._update_env_accounts(env_name, {acc: val})
+                                msg, count = await self.main_plugin._update_env_accounts(env_name, {acc: val})
                                 return f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
                             else:
-                                return await self._set_env(env_name, raw)
+                                return await self.main_plugin._set_env(env_name, raw)
                         else:
-                            return await self._set_env(env_name, raw)
+                            return await self.main_plugin._set_env(env_name, raw)
                 except Exception as e:
                     logger.error(f"交互更新失败: {e}")
                     return f"❌ 更新失败：{str(e)}"
@@ -542,7 +559,7 @@ class DaidaiManagerPlugin(Star):
                 script_path = content
                 try:
                     payload = {"path": script_path}
-                    result = await self._call_api("scripts/run", data=payload)
+                    result = await self.main_plugin._call_api("scripts/run", data=payload)
                     if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                         error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                         return f"❌ 运行失败：{error_msg}"
@@ -558,7 +575,7 @@ class DaidaiManagerPlugin(Star):
             if step == 'task_name':
                 task_name = content
                 try:
-                    result = await self._call_api("tasks?page=1&page_size=100", method="GET")
+                    result = await self.main_plugin._call_api("tasks?page=1&page_size=100", method="GET")
                     tasks = result.get("data")
                     if not tasks or not isinstance(tasks, list):
                         del self.sessions[user_id]
@@ -572,7 +589,7 @@ class DaidaiManagerPlugin(Star):
                         del self.sessions[user_id]
                         return f"❌ 未找到名称为 '{task_name}' 的任务"
 
-                    result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={})
+                    result = await self.main_plugin._call_api(f"tasks/{task_id}/run", method="PUT", data={})
                     if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                         error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
                         return f"❌ 运行任务失败：{error_msg}"
@@ -589,18 +606,17 @@ class DaidaiManagerPlugin(Star):
         del self.sessions[user_id]
         return "❌ 未知交互操作，已取消"
 
-    # ---------- 重写 on_message 方法（用于捕获普通消息） ----------
+    # ---------- 重写 on_message 方法，拦截普通消息 ----------
     async def on_message(self, event: AstrMessageEvent):
-        """拦截非指令消息，用于交互式会话"""
         user_id = str(event.get_user_id())
         if user_id in self.sessions:
             result = await self._handle_interactive_input(event)
             if result is not None:
                 yield event.plain_result(result)
-            # 无论是否处理，都直接返回，不再传递给其他处理器
+            # 处理完直接返回，不继续传播
             return
 
-    # ---------- 新增：/菜单 和 /menu 指令 ----------
+    # ---------- 交互式指令 ----------
     @filter.command("菜单")
     @filter.command("menu")
     async def show_menu(self, event: AstrMessageEvent):
@@ -626,12 +642,14 @@ class DaidaiManagerPlugin(Star):
 /取消 → 取消当前交互操作"""
         yield event.plain_result(menu_text)
 
-    # ---------- 新增：交互式指令 ----------
     @filter.command("交互列表")
     async def interactive_list(self, event: AstrMessageEvent):
         """交互式获取环境变量列表（直接返回）"""
+        if not self.main_plugin:
+            yield event.plain_result("❌ 主插件未加载")
+            return
         try:
-            envs = await self._fetch_env_list()
+            envs = await self.main_plugin._fetch_env_list()
             if not envs:
                 yield event.plain_result("📭 当前没有环境变量")
             else:
@@ -678,4 +696,3 @@ class DaidaiManagerPlugin(Star):
             return
         self.sessions[user_id] = {'action': 'task', 'step': 'task_name'}
         yield event.plain_result("📝 请输入要运行的任务名称（输入 /取消 可取消）")
-    # ==================== 新增内容结束 ====================
