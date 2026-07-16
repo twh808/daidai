@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（增加 /更新变量）")
+        logger.info("✅ 呆呆面板插件已加载（指令描述版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -99,6 +99,10 @@ class DaidaiManagerPlugin(Star):
 
     # ---------- 批量更新账户（返回 (msg, count)） ----------
     async def _update_env_accounts(self, env_name: str, accounts: dict) -> tuple:
+        """
+        accounts: { account1: new_value1, account2: new_value2, ... }
+        返回 (result_msg, total_count)
+        """
         total = len(accounts)
         env_id = await self._get_env_id_by_name(env_name)
         if env_id is None:
@@ -180,9 +184,10 @@ class DaidaiManagerPlugin(Star):
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
     # ========== 指令部分 ==========
-    # 环境变量列表（保持不变）
+    # ---------- 环境变量列表（多种别名） ----------
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
+        """查看呆呆面板中的所有环境变量列表"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -204,6 +209,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("环境变量列表")
     async def huanjingbianliangliebiao(self, event: AstrMessageEvent):
+        """查看所有环境变量（中文别名，与 /envlist 相同）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -225,6 +231,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量列表")
     async def bianliangliebiao(self, event: AstrMessageEvent):
+        """查看所有环境变量（中文别名，与 /envlist 相同）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -246,6 +253,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量")
     async def bianliang(self, event: AstrMessageEvent):
+        """查看所有环境变量（最短别名，与 /envlist 相同）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -267,6 +275,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("envs")
     async def envs(self, event: AstrMessageEvent):
+        """查看所有环境变量（英文短别名，与 /envlist 相同）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -286,78 +295,29 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 更新环境变量（原有指令，保持不变） ----------
-    @filter.command("更新环境变量")
-    async def update_env_old(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        '''
-        用法：
-        覆盖模式：/更新环境变量 <变量名> <新值>（不包含#）
-        账户更新模式：
-          - 单账户：/更新环境变量 <变量名> <账号#新值>
-          - 多账户：/更新环境变量 <变量名> <账号1#值1&账号2#值2&...>
-        '''
-        try:
-            raw = new_value.replace('\n', '').replace('\r', '').strip()
-            if '&' in raw:
-                parts = raw.split('&')
-                accounts = {}
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-                    if '#' in part:
-                        acc_val = part.split('#', 1)
-                        acc = acc_val[0].strip()
-                        val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                        if acc and val:
-                            accounts[acc] = val
-                        else:
-                            yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
-                            return
-                    else:
-                        yield event.plain_result(f"❌ 格式错误：'{part}' 缺少 # 分隔符")
-                        return
-                if accounts:
-                    msg, count = await self._update_env_accounts(env_name, accounts)
-                    if "✅" in msg:
-                        yield event.plain_result(f"检测到 {count} 个账户，{msg}")
-                    else:
-                        yield event.plain_result(msg)
-                else:
-                    yield event.plain_result("❌ 未检测到有效的账户更新条目")
-            else:
-                if '#' in raw:
-                    acc_val = raw.split('#', 1)
-                    acc = acc_val[0].strip()
-                    val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                    if acc and val:
-                        msg, count = await self._update_env_accounts(env_name, {acc: val})
-                        if "✅" in msg:
-                            yield event.plain_result(f"检测到 {count} 个账户，{msg}")
-                        else:
-                            yield event.plain_result(msg)
-                    else:
-                        msg = await self._set_env(env_name, raw)
-                        yield event.plain_result(msg)
-                else:
-                    msg = await self._set_env(env_name, raw)
-                    yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"更新环境变量失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    # ---------- 新增 /更新变量 指令（与上面逻辑完全相同） ----------
+    # ---------- 更新环境变量（支持 /更新变量 和 /更新环境变量） ----------
     @filter.command("更新变量")
-    async def update_env_new(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        '''
-        用法：
-        覆盖模式：/更新变量 <变量名> <新值>（不包含#）
-        账户更新模式：
-          - 单账户：/更新变量 <变量名> <账号#新值>
-          - 多账户：/更新变量 <变量名> <账号1#值1&账号2#值2&...>
-        '''
+    @filter.command("更新环境变量")
+    async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
+        """
+        更新或创建环境变量，支持覆盖模式和账户更新模式。
+
+        覆盖模式（不包含 #）：
+          /更新变量 <变量名> <新值>
+          示例：/更新变量 CODE 123456
+
+        单账户更新（包含 #）：
+          /更新变量 <变量名> <账号#新值>
+          示例：/更新变量 CODE 15507099836#16487
+
+        多账户更新（& 分隔）：
+          /更新变量 <变量名> <账号1#值1&账号2#值2&...>
+          示例：/更新变量 CODE 15507099836#16487&18870799391#093236
+        """
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
+            logger.info(f"原始输入: {raw}")
+
             if '&' in raw:
                 parts = raw.split('&')
                 accounts = {}
@@ -409,6 +369,7 @@ class DaidaiManagerPlugin(Star):
     # ---------- 运行脚本 ----------
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
+        """运行呆呆面板中的脚本文件（需提供容器内的绝对路径）"""
         try:
             payload = {"path": script_path}
             result = await self._call_api("scripts/run", data=payload)
@@ -424,6 +385,7 @@ class DaidaiManagerPlugin(Star):
     # ---------- 运行任务 ----------
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
+        """运行呆呆面板中的定时任务（按任务名称匹配）"""
         try:
             result = await self._call_api("tasks?page=1&page_size=100", method="GET")
             tasks = result.get("data")
