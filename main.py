@@ -183,8 +183,7 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ========== 指令部分 ==========
-    # ---------- 环境变量列表（多种别名） ----------
+    # ========== 指令部分（仅添加了描述注释） ==========
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         """查看呆呆面板中的所有环境变量列表"""
@@ -209,7 +208,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("环境变量列表")
     async def huanjingbianliangliebiao(self, event: AstrMessageEvent):
-        """查看所有环境变量（中文别名，与 /envlist 相同）"""
+        """查看所有环境变量（中文别名）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -231,7 +230,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量列表")
     async def bianliangliebiao(self, event: AstrMessageEvent):
-        """查看所有环境变量（中文别名，与 /envlist 相同）"""
+        """查看所有环境变量（中文别名）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -253,7 +252,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量")
     async def bianliang(self, event: AstrMessageEvent):
-        """查看所有环境变量（最短别名，与 /envlist 相同）"""
+        """查看所有环境变量（最短别名）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -275,7 +274,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("envs")
     async def envs(self, event: AstrMessageEvent):
-        """查看所有环境变量（英文短别名，与 /envlist 相同）"""
+        """查看所有环境变量（英文短别名）"""
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -295,7 +294,6 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 更新环境变量（支持 /更新变量 和 /更新环境变量） ----------
     @filter.command("更新变量")
     @filter.command("更新环境变量")
     async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
@@ -366,7 +364,6 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"更新环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 运行脚本 ----------
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
         """运行呆呆面板中的脚本文件（需提供容器内的绝对路径）"""
@@ -382,7 +379,6 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 运行任务 ----------
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
         """运行呆呆面板中的定时任务（按任务名称匹配）"""
