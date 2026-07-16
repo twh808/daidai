@@ -1,4 +1,4 @@
-name: astrbot_plugin_daidai_manager          # 插件名，与仓库名一致
+name: 呆呆面板管理          # 插件名，与仓库名一致
 desc: 通过QQ机器人管理呆呆面板                  # 插件描述
 author: 一休哥                              # 作者
 version: 1.0.1                               # 版本号
