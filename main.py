@@ -16,7 +16,7 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
         self.sessions = {}
-        logger.info("✅ 呆呆面板插件已加载（增加菜单）")
+        logger.info("✅ 呆呆面板插件已加载（修复版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -98,7 +98,7 @@ class DaidaiManagerPlugin(Star):
             return False
         return True
 
-    # ---------- 批量更新账户（返回 (msg, count)） ----------
+    # ---------- 批量更新账户 ----------
     async def _update_env_accounts(self, env_name: str, accounts: dict) -> tuple:
         total = len(accounts)
         env_id = await self._get_env_id_by_name(env_name)
@@ -180,7 +180,7 @@ class DaidaiManagerPlugin(Star):
 
     # ---------- 交互会话处理 ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())
         if user_id not in self.sessions:
             return False
 
@@ -306,7 +306,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.on_message()
     async def on_message(self, event: AstrMessageEvent):
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())
         if user_id in self.sessions:
             async for result in self._handle_interactive_input(event):
                 yield result
@@ -336,7 +336,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("交互更新")
     async def interactive_update(self, event: AstrMessageEvent):
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -345,7 +345,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("交互脚本")
     async def interactive_script(self, event: AstrMessageEvent):
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
@@ -354,14 +354,14 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("交互任务")
     async def interactive_task(self, event: AstrMessageEvent):
-        user_id = str(event.get_user_id())
+        user_id = str(event.get_sender_id())
         if user_id in self.sessions:
             yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
             return
         self.sessions[user_id] = {'action': 'task', 'step': 'task_name'}
         yield event.plain_result("📝 请输入要运行的任务名称（输入 /取消 可取消）")
 
-    # ---------- 原有直接指令（保持不变） ----------
+    # ---------- 原有直接指令 ----------
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         try:
