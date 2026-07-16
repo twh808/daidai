@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（计数修复版）")
+        logger.info("✅ 呆呆面板插件已加载（简化指令版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -103,7 +103,7 @@ class DaidaiManagerPlugin(Star):
         accounts: { account1: new_value1, account2: new_value2, ... }
         返回 (result_msg, total_count)
         """
-        total = len(accounts)  # 保存总数
+        total = len(accounts)
         env_id = await self._get_env_id_by_name(env_name)
         if env_id is None:
             items = [f"{acc}#{val}" for acc, val in accounts.items()]
@@ -184,7 +184,7 @@ class DaidaiManagerPlugin(Star):
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
     # ========== 指令部分 ==========
-    # 环境变量列表（多个别名，与之前相同，这里省略以节省篇幅，但实际代码需完整）
+    # 环境变量列表（多个别名）
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         try:
@@ -290,15 +290,17 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 更新环境变量（增强解析 & 计数修复） ----------
-    @filter.command("更新环境变量")
+    # ---------- 更新环境变量（同时支持 /更新变量 和 /更新环境变量） ----------
+    @filter.command("更新变量")         # 新增简化指令
+    @filter.command("更新环境变量")     # 保留原指令作为兼容
     async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
         '''
         用法：
-        覆盖模式：/更新环境变量 <变量名> <新值>（不包含#）
+        覆盖模式：/更新变量 <变量名> <新值>（不包含#）
         账户更新模式：
-          - 单账户：/更新环境变量 <变量名> <账号#新值>
-          - 多账户：/更新环境变量 <变量名> <账号1#值1&账号2#值2&...>
+          - 单账户：/更新变量 <变量名> <账号#新值>
+          - 多账户：/更新变量 <变量名> <账号1#值1&账号2#值2&...>
+        也支持 /更新环境变量
         '''
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
