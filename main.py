@@ -16,7 +16,7 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
         self.sessions = {}
-        logger.info("✅ 呆呆面板插件已加载（消息拦截修复版）")
+        logger.info("✅ 呆呆面板插件已加载（重写 on_message 版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -299,8 +299,7 @@ class DaidaiManagerPlugin(Star):
         del self.sessions[user_id]
         return True, "❌ 未知交互操作，已取消"
 
-    # ---------- 消息拦截（使用 @filter.message） ----------
-    @filter.message()
+    # ---------- 重写 on_message 方法（无装饰器） ----------
     async def on_message(self, event: AstrMessageEvent):
         user_id = str(event.get_sender_id())
         if user_id in self.sessions:
