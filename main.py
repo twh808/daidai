@@ -10,24 +10,19 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        # 默认地址改为通用本地地址，实际使用时在插件配置中填写
-        self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
+        self.base_url = config.get("base_url", "http://127.0.0.1:5777/api/v1")
         self.app_key = config.get("app_key", "")
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        # 交互会话存储
-        self.sessions = {}
-        logger.info("✅ 呆呆面板插件已加载（增加交互功能）")
+        logger.info("✅ 呆呆面板插件已加载（增加 /更新变量）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
         if self.token and self.token_expiry > time.time():
             return self.token
 
-        # 从 base_url 构造 token 接口地址
-        base = self.base_url.replace("/api/v1", "").replace("/api", "")
-        token_url = f"{base}/api/open-api/token"
+        token_url = f"http://127.0.0.1:5777/api/open-api/token"
         payload = {
             "app_key": self.app_key,
             "app_secret": self.app_secret
@@ -184,7 +179,7 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ========== 原有指令 ==========
+    # ========== 指令部分 ==========
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         """查看呆呆面板中的所有环境变量列表"""
@@ -310,7 +305,7 @@ class DaidaiManagerPlugin(Star):
 
         多账户更新（& 分隔）：
           /更新环境变量 <变量名> <账号1#值1&账号2#值2&...>
-          示例：/更新环境变量 CODE 155********#16487&155********#093236
+          示例：/更新环境变量 CODE 155********#16487&188********#093236
         """
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
@@ -377,7 +372,7 @@ class DaidaiManagerPlugin(Star):
 
         多账户更新（& 分隔）：
           /更新变量 <变量名> <账号1#值1&账号2#值2&...>
-          示例：/更新变量 CODE 155********#16487&155********#093236
+          示例：/更新变量 CODE 155********#16487&188********#093236
         """
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
@@ -472,213 +467,3 @@ class DaidaiManagerPlugin(Star):
         except Exception as e:
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    # ==================== 新增交互功能开始 ====================
-    # ---------- 交互会话处理 ----------
-    async def _handle_interactive_input(self, event: AstrMessageEvent):
-        """处理交互式会话中的用户输入，返回消息字符串或 None"""
-        user_id = str(event.get_user_id())
-        if user_id not in self.sessions:
-            return None
-
-        session = self.sessions[user_id]
-        action = session.get('action')
-        step = session.get('step')
-        content = event.get_message_text().strip()
-
-        if content == '/取消':
-            del self.sessions[user_id]
-            return "🔄 已取消当前交互操作"
-
-        if action == 'update':
-            if step == 'env_name':
-                session['env_name'] = content
-                session['step'] = 'new_value'
-                return f"📝 请输入变量 '{content}' 的新值（支持多账户格式：账号#值&账号2#值2）"
-            elif step == 'new_value':
-                env_name = session['env_name']
-                new_value = content
-                try:
-                    raw = new_value.replace('\n', '').replace('\r', '').strip()
-                    if '&' in raw:
-                        parts = raw.split('&')
-                        accounts = {}
-                        for part in parts:
-                            part = part.strip()
-                            if not part:
-                                continue
-                            if '#' in part:
-                                acc_val = part.split('#', 1)
-                                acc = acc_val[0].strip()
-                                val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                                if acc and val:
-                                    accounts[acc] = val
-                                else:
-                                    return f"❌ 格式错误：'{part}' 缺少账号或值"
-                            else:
-                                return f"❌ 格式错误：'{part}' 缺少 # 分隔符"
-                        if accounts:
-                            msg, count = await self._update_env_accounts(env_name, accounts)
-                            return f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
-                        else:
-                            return "❌ 未检测到有效的账户更新条目"
-                    else:
-                        if '#' in raw:
-                            acc_val = raw.split('#', 1)
-                            acc = acc_val[0].strip()
-                            val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                            if acc and val:
-                                msg, count = await self._update_env_accounts(env_name, {acc: val})
-                                return f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
-                            else:
-                                return await self._set_env(env_name, raw)
-                        else:
-                            return await self._set_env(env_name, raw)
-                except Exception as e:
-                    logger.error(f"交互更新失败: {e}")
-                    return f"❌ 更新失败：{str(e)}"
-                finally:
-                    del self.sessions[user_id]
-
-        elif action == 'script':
-            if step == 'script_path':
-                script_path = content
-                try:
-                    payload = {"path": script_path}
-                    result = await self._call_api("scripts/run", data=payload)
-                    if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
-                        error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
-                        return f"❌ 运行失败：{error_msg}"
-                    else:
-                        return "✅ 脚本已成功执行！"
-                except Exception as e:
-                    logger.error(f"交互运行脚本失败: {e}")
-                    return f"❌ 运行失败：{str(e)}"
-                finally:
-                    del self.sessions[user_id]
-
-        elif action == 'task':
-            if step == 'task_name':
-                task_name = content
-                try:
-                    result = await self._call_api("tasks?page=1&page_size=100", method="GET")
-                    tasks = result.get("data")
-                    if not tasks or not isinstance(tasks, list):
-                        del self.sessions[user_id]
-                        return "❌ 获取任务列表失败"
-                    task_id = None
-                    for task in tasks:
-                        if task.get("name") == task_name:
-                            task_id = task.get("id")
-                            break
-                    if task_id is None:
-                        del self.sessions[user_id]
-                        return f"❌ 未找到名称为 '{task_name}' 的任务"
-
-                    result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={})
-                    if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
-                        error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
-                        return f"❌ 运行任务失败：{error_msg}"
-                    else:
-                        message = result.get("message", "任务已启动")
-                        return f"✅ {message}"
-                except Exception as e:
-                    logger.error(f"交互运行任务失败: {e}")
-                    return f"❌ 运行失败：{str(e)}"
-                finally:
-                    del self.sessions[user_id]
-
-        # 未知动作
-        del self.sessions[user_id]
-        return "❌ 未知交互操作，已取消"
-
-    # ---------- 重写 on_message 方法（无装饰器） ----------
-    async def on_message(self, event: AstrMessageEvent):
-        """拦截普通消息，用于交互式会话"""
-        user_id = str(event.get_user_id())
-        if user_id in self.sessions:
-            result = await self._handle_interactive_input(event)
-            if result is not None:
-                yield event.plain_result(result)
-            # 已处理，不继续传递
-            return
-
-    # ---------- 新增 /菜单 指令 ----------
-    @filter.command("菜单")
-    @filter.command("menu")
-    async def show_menu(self, event: AstrMessageEvent):
-        """显示所有可用指令及其说明"""
-        menu_text = """📋 呆呆面板助手 — 可用指令
-
-【环境变量】
-/变量、/envlist、/环境变量列表、/变量列表、/envs  → 查看所有环境变量
-/更新变量 <变量名> <新值> 或 /更新环境变量 <变量名> <新值> → 直接更新（覆盖或账号模式）
-/交互更新 → 分步引导更新环境变量
-/交互列表 → 交互式查看环境变量列表（直接返回）
-
-【脚本管理】
-/运行脚本 <脚本路径> → 直接运行脚本
-/交互脚本 → 分步引导运行脚本
-
-【任务管理】
-/运行任务 <任务名称> → 直接运行任务
-/交互任务 → 分步引导运行任务
-
-【其他】
-/菜单、/menu → 显示本菜单
-/取消 → 取消当前交互操作"""
-        yield event.plain_result(menu_text)
-
-    # ---------- 新增交互指令 ----------
-    @filter.command("交互列表")
-    async def interactive_list(self, event: AstrMessageEvent):
-        """交互式获取环境变量列表（直接返回）"""
-        try:
-            envs = await self._fetch_env_list()
-            if not envs:
-                yield event.plain_result("📭 当前没有环境变量")
-            else:
-                msg = "📋 环境变量列表：\n"
-                for env in envs:
-                    name = env.get("name", "未命名")
-                    value = env.get("value", "")
-                    group = env.get("group", "默认分组")
-                    remarks = env.get("remarks", "")
-                    remarks_str = f" ({remarks})" if remarks else ""
-                    display_value = value if len(value) <= 50 else value[:50] + "..."
-                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
-                yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"获取环境变量列表失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    @filter.command("交互更新")
-    async def interactive_update(self, event: AstrMessageEvent):
-        """交互式更新环境变量，逐步引导输入变量名和新值"""
-        user_id = str(event.get_user_id())
-        if user_id in self.sessions:
-            yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
-            return
-        self.sessions[user_id] = {'action': 'update', 'step': 'env_name'}
-        yield event.plain_result("📝 请输入要更新的环境变量名称（输入 /取消 可取消）")
-
-    @filter.command("交互脚本")
-    async def interactive_script(self, event: AstrMessageEvent):
-        """交互式运行脚本，引导输入脚本路径"""
-        user_id = str(event.get_user_id())
-        if user_id in self.sessions:
-            yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
-            return
-        self.sessions[user_id] = {'action': 'script', 'step': 'script_path'}
-        yield event.plain_result("📝 请输入要运行的脚本在容器内的绝对路径（输入 /取消 可取消）")
-
-    @filter.command("交互任务")
-    async def interactive_task(self, event: AstrMessageEvent):
-        """交互式运行任务，引导输入任务名称"""
-        user_id = str(event.get_user_id())
-        if user_id in self.sessions:
-            yield event.plain_result("⚠️ 您已有进行中的交互，请先完成或发送 /取消 取消")
-            return
-        self.sessions[user_id] = {'action': 'task', 'step': 'task_name'}
-        yield event.plain_result("📝 请输入要运行的任务名称（输入 /取消 可取消）")
-    # ==================== 新增交互功能结束 ====================
