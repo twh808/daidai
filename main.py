@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（批量更新版）")
+        logger.info("✅ 呆呆面板插件已加载（批量更新修复版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -103,14 +103,13 @@ class DaidaiManagerPlugin(Star):
         accounts: { account1: new_value1, account2: new_value2, ... }
         返回更新结果消息字符串
         """
+        total = len(accounts)  # 保存总账户数
         env_id = await self._get_env_id_by_name(env_name)
-        # 如果变量不存在，创建新变量（使用 & 分隔，因为多账户）
         if env_id is None:
-            # 构建初始值
             items = [f"{acc}#{val}" for acc, val in accounts.items()]
             initial = '&'.join(items)
             if await self._create_env(env_name, initial):
-                return f"✅ 环境变量 '{env_name}' 已创建，包含 {len(accounts)} 个账户"
+                return f"✅ 环境变量 '{env_name}' 已创建，包含 {total} 个账户"
             else:
                 return f"❌ 创建环境变量 '{env_name}' 失败"
 
@@ -130,58 +129,44 @@ class DaidaiManagerPlugin(Star):
         elif '&' in current_value:
             separator = '&'
         else:
-            separator = None  # 无分隔符
+            separator = None
 
         if separator is None:
-            # 无分隔符，可能只有一个账号
             if '#' in current_value:
                 parts = current_value.split('#', 1)
-                # 如果当前账号在更新列表中，则更新，否则保留并追加其他
-                # 我们构建新的列表
                 items = []
                 existing_acc = parts[0]
                 existing_val = parts[1]
                 if existing_acc in accounts:
-                    # 更新该账号
                     items.append(f"{existing_acc}#{accounts[existing_acc]}")
-                    # 从待更新列表中移除已处理
                     accounts.pop(existing_acc)
                 else:
-                    items.append(current_value)  # 保留原样
-                # 追加其他新账户
+                    items.append(current_value)
                 for acc, val in accounts.items():
                     items.append(f"{acc}#{val}")
-                new_val = '&'.join(items)  # 默认使用 & 分隔
+                new_val = '&'.join(items)
             else:
-                # 既无分隔也无#，视为普通值，无法进行账号更新，提示使用覆盖模式
                 return f"❌ 当前值不是账号格式，请使用覆盖模式：/更新环境变量 {env_name} <新值>"
         else:
-            # 有分隔符，按分隔符拆分
             items = current_value.split(separator)
             items = [item for item in items if item.strip()]
             new_items = []
-            # 遍历现有项，更新匹配的账户
             for item in items:
                 if '#' in item:
                     acc, val = item.split('#', 1)
                     if acc in accounts:
-                        # 更新该账户
                         new_items.append(f"{acc}#{accounts[acc]}")
-                        # 从待更新列表中移除已处理
                         accounts.pop(acc)
                     else:
                         new_items.append(item)
                 else:
-                    # 格式异常，保留原样
                     new_items.append(item)
-            # 追加新增的账户
             for acc, val in accounts.items():
                 new_items.append(f"{acc}#{val}")
-            # 使用原分隔符组合
             new_val = separator.join(new_items)
 
         if await self._update_env(env_id, env_name, new_val):
-            return f"✅ 环境变量 '{env_name}' 已更新，共处理 {len(accounts)} 个账户"
+            return f"✅ 环境变量 '{env_name}' 已更新，共处理 {total} 个账户"
         else:
             return "❌ 更新失败"
 
@@ -200,7 +185,6 @@ class DaidaiManagerPlugin(Star):
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
     # ========== 指令部分 ==========
-    # 环境变量列表（与原一致，此处省略，沿用之前的全部）
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         try:
@@ -317,7 +301,6 @@ class DaidaiManagerPlugin(Star):
           - 多账户：/更新环境变量 <变量名> <账号1#值1\n账号2#值2\n...>
         '''
         try:
-            # 检查是否包含换行符，如果包含则按行拆分，视为多账户更新
             if '\n' in new_value:
                 lines = new_value.strip().split('\n')
                 accounts = {}
@@ -344,21 +327,17 @@ class DaidaiManagerPlugin(Star):
                     yield event.plain_result("❌ 未检测到有效的账户更新条目")
                 return
 
-            # 单账户或覆盖模式
             if '#' in new_value:
                 parts = new_value.split('#', 1)
                 account = parts[0].strip()
                 value = parts[1].strip() if len(parts) > 1 else ''
                 if account and value:
-                    # 单账户更新，构建字典调用批量方法
                     msg = await self._update_env_accounts(env_name, {account: value})
                     yield event.plain_result(msg)
                 else:
-                    # 格式不完整，当作覆盖
                     msg = await self._set_env(env_name, new_value)
                     yield event.plain_result(msg)
             else:
-                # 不包含 #，直接覆盖
                 msg = await self._set_env(env_name, new_value)
                 yield event.plain_result(msg)
         except Exception as e:
