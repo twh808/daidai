@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（分隔符保留版）")
+        logger.info("✅ 呆呆面板插件已加载（批量更新版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -97,6 +97,95 @@ class DaidaiManagerPlugin(Star):
             return False
         return True
 
+    # ---------- 批量更新账户（支持多个账户，保留原分隔符） ----------
+    async def _update_env_accounts(self, env_name: str, accounts: dict) -> str:
+        """
+        accounts: { account1: new_value1, account2: new_value2, ... }
+        返回更新结果消息字符串
+        """
+        env_id = await self._get_env_id_by_name(env_name)
+        # 如果变量不存在，创建新变量（使用 & 分隔，因为多账户）
+        if env_id is None:
+            # 构建初始值
+            items = [f"{acc}#{val}" for acc, val in accounts.items()]
+            initial = '&'.join(items)
+            if await self._create_env(env_name, initial):
+                return f"✅ 环境变量 '{env_name}' 已创建，包含 {len(accounts)} 个账户"
+            else:
+                return f"❌ 创建环境变量 '{env_name}' 失败"
+
+        # 获取当前值
+        envs = await self._fetch_env_list()
+        current_value = None
+        for env in envs:
+            if env.get("id") == env_id:
+                current_value = env.get("value", "")
+                break
+        if current_value is None:
+            return "❌ 未找到该环境变量的当前值"
+
+        # 检测分隔符
+        if '\n' in current_value:
+            separator = '\n'
+        elif '&' in current_value:
+            separator = '&'
+        else:
+            separator = None  # 无分隔符
+
+        if separator is None:
+            # 无分隔符，可能只有一个账号
+            if '#' in current_value:
+                parts = current_value.split('#', 1)
+                # 如果当前账号在更新列表中，则更新，否则保留并追加其他
+                # 我们构建新的列表
+                items = []
+                existing_acc = parts[0]
+                existing_val = parts[1]
+                if existing_acc in accounts:
+                    # 更新该账号
+                    items.append(f"{existing_acc}#{accounts[existing_acc]}")
+                    # 从待更新列表中移除已处理
+                    accounts.pop(existing_acc)
+                else:
+                    items.append(current_value)  # 保留原样
+                # 追加其他新账户
+                for acc, val in accounts.items():
+                    items.append(f"{acc}#{val}")
+                new_val = '&'.join(items)  # 默认使用 & 分隔
+            else:
+                # 既无分隔也无#，视为普通值，无法进行账号更新，提示使用覆盖模式
+                return f"❌ 当前值不是账号格式，请使用覆盖模式：/更新环境变量 {env_name} <新值>"
+        else:
+            # 有分隔符，按分隔符拆分
+            items = current_value.split(separator)
+            items = [item for item in items if item.strip()]
+            new_items = []
+            # 遍历现有项，更新匹配的账户
+            for item in items:
+                if '#' in item:
+                    acc, val = item.split('#', 1)
+                    if acc in accounts:
+                        # 更新该账户
+                        new_items.append(f"{acc}#{accounts[acc]}")
+                        # 从待更新列表中移除已处理
+                        accounts.pop(acc)
+                    else:
+                        new_items.append(item)
+                else:
+                    # 格式异常，保留原样
+                    new_items.append(item)
+            # 追加新增的账户
+            for acc, val in accounts.items():
+                new_items.append(f"{acc}#{val}")
+            # 使用原分隔符组合
+            new_val = separator.join(new_items)
+
+        if await self._update_env(env_id, env_name, new_val):
+            return f"✅ 环境变量 '{env_name}' 已更新，共处理 {len(accounts)} 个账户"
+        else:
+            return "❌ 更新失败"
+
+    # ---------- 覆盖模式（单值） ----------
     async def _set_env(self, env_name: str, new_value: str) -> str:
         env_id = await self._get_env_id_by_name(env_name)
         if env_id is None:
@@ -110,77 +199,8 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ---------- 账户更新模式（保留原分隔符） ----------
-    async def _update_env_account(self, env_name: str, account: str, new_value: str) -> str:
-        env_id = await self._get_env_id_by_name(env_name)
-        if env_id is None:
-            initial = f"{account}#{new_value}"
-            if await self._create_env(env_name, initial):
-                return f"✅ 环境变量 '{env_name}' 已创建，账号 '{account}' 设为 '{new_value}'"
-            else:
-                return f"❌ 创建环境变量 '{env_name}' 失败"
-
-        envs = await self._fetch_env_list()
-        current_value = None
-        for env in envs:
-            if env.get("id") == env_id:
-                current_value = env.get("value", "")
-                break
-        if current_value is None:
-            return "❌ 未找到该环境变量的当前值"
-
-        # 检测分隔符
-        if '\n' in current_value:
-            separator = '\n'
-            items = current_value.split('\n')
-        elif '&' in current_value:
-            separator = '&'
-            items = current_value.split('&')
-        else:
-            # 无分隔符，可能是单个账号
-            if '#' in current_value:
-                parts = current_value.split('#', 1)
-                if parts[0] == account:
-                    new_val = f"{account}#{new_value}"
-                    if await self._update_env(env_id, env_name, new_val):
-                        return f"✅ 环境变量 '{env_name}' 中账号 '{account}' 已更新为 '{new_value}'"
-                    else:
-                        return "❌ 更新失败"
-                else:
-                    new_val = current_value + "&" + f"{account}#{new_value}"
-                    if await self._update_env(env_id, env_name, new_val):
-                        return f"✅ 环境变量 '{env_name}' 已添加账号 '{account}' 为 '{new_value}'"
-                    else:
-                        return "❌ 更新失败"
-            else:
-                return f"❌ 当前值不是账号格式，请使用覆盖模式：/更新环境变量 {env_name} <新值>"
-
-        # 有分隔符，处理多账号
-        items = [item for item in items if item.strip()]
-        found = False
-        new_items = []
-        for item in items:
-            if '#' in item:
-                acc, val = item.split('#', 1)
-                if acc.strip() == account:
-                    new_items.append(f"{account}#{new_value}")
-                    found = True
-                else:
-                    new_items.append(item)
-            else:
-                new_items.append(item)
-        if not found:
-            new_items.append(f"{account}#{new_value}")
-        new_val = separator.join(new_items)
-        if await self._update_env(env_id, env_name, new_val):
-            if found:
-                return f"✅ 环境变量 '{env_name}' 中账号 '{account}' 已更新为 '{new_value}'"
-            else:
-                return f"✅ 环境变量 '{env_name}' 已添加账号 '{account}' 为 '{new_value}'"
-        else:
-            return "❌ 更新失败"
-
     # ========== 指令部分 ==========
+    # 环境变量列表（与原一致，此处省略，沿用之前的全部）
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         try:
@@ -286,29 +306,66 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
+    # ---------- 更新环境变量（支持批量） ----------
     @filter.command("更新环境变量")
     async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
         '''
         用法：
-        /更新环境变量 <变量名> <新值>
-        如果新值包含 '#'，则按账号更新（格式：账号#新值），否则覆盖整个变量
+        覆盖模式：/更新环境变量 <变量名> <新值>（不包含#）
+        账户更新模式：
+          - 单账户：/更新环境变量 <变量名> <账号#新值>
+          - 多账户：/更新环境变量 <变量名> <账号1#值1\n账号2#值2\n...>
         '''
         try:
+            # 检查是否包含换行符，如果包含则按行拆分，视为多账户更新
+            if '\n' in new_value:
+                lines = new_value.strip().split('\n')
+                accounts = {}
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if '#' in line:
+                        parts = line.split('#', 1)
+                        acc = parts[0].strip()
+                        val = parts[1].strip() if len(parts) > 1 else ''
+                        if acc and val:
+                            accounts[acc] = val
+                        else:
+                            yield event.plain_result(f"❌ 格式错误：'{line}' 缺少账号或值")
+                            return
+                    else:
+                        yield event.plain_result(f"❌ 格式错误：'{line}' 缺少 # 分隔符")
+                        return
+                if accounts:
+                    msg = await self._update_env_accounts(env_name, accounts)
+                    yield event.plain_result(msg)
+                else:
+                    yield event.plain_result("❌ 未检测到有效的账户更新条目")
+                return
+
+            # 单账户或覆盖模式
             if '#' in new_value:
                 parts = new_value.split('#', 1)
                 account = parts[0].strip()
                 value = parts[1].strip() if len(parts) > 1 else ''
                 if account and value:
-                    msg = await self._update_env_account(env_name, account, value)
+                    # 单账户更新，构建字典调用批量方法
+                    msg = await self._update_env_accounts(env_name, {account: value})
+                    yield event.plain_result(msg)
                 else:
+                    # 格式不完整，当作覆盖
                     msg = await self._set_env(env_name, new_value)
+                    yield event.plain_result(msg)
             else:
+                # 不包含 #，直接覆盖
                 msg = await self._set_env(env_name, new_value)
-            yield event.plain_result(msg)
+                yield event.plain_result(msg)
         except Exception as e:
             logger.error(f"更新环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
+    # ---------- 运行脚本 ----------
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
         try:
@@ -323,6 +380,7 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
+    # ---------- 运行任务 ----------
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
         try:
