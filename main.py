@@ -10,22 +10,19 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        # 默认地址改为通用本地地址，实际使用时在插件配置中填写
         self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
         self.app_key = config.get("app_key", "")
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
         self.sessions = {}
-        logger.info("✅ 呆呆面板插件已加载（修复版）")
+        logger.info("✅ 呆呆面板插件已加载（消息拦截修复版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
         if self.token and self.token_expiry > time.time():
             return self.token
 
-        token_url = f"http://127.0.0.1:5700/api/open-api/token"  # 注意：token 接口也在同一地址，用户需配置 base_url，但为了灵活性，我们使用配置的 base_url 构造
-        # 改进：使用 self.base_url 构造 token_url
         base = self.base_url.replace("/api/v1", "").replace("/api", "")
         token_url = f"{base}/api/open-api/token"
         payload = {
@@ -182,9 +179,8 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ---------- 交互会话处理（改为普通异步函数） ----------
+    # ---------- 交互会话处理 ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
-        """处理交互输入，返回 (handled, message)"""
         user_id = str(event.get_sender_id())
         if user_id not in self.sessions:
             return False, ""
@@ -300,11 +296,11 @@ class DaidaiManagerPlugin(Star):
                 finally:
                     del self.sessions[user_id]
 
-        # 未知动作，清理会话
         del self.sessions[user_id]
         return True, "❌ 未知交互操作，已取消"
 
-    @filter.on_message()
+    # ---------- 消息拦截（使用 @filter.message） ----------
+    @filter.message()
     async def on_message(self, event: AstrMessageEvent):
         user_id = str(event.get_sender_id())
         if user_id in self.sessions:
