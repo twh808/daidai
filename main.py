@@ -1,5 +1,6 @@
 import aiohttp
 import time
+import json
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
@@ -14,8 +15,9 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（纯装饰器版）")
+        logger.info("✅ 呆呆面板插件已加载（完整版）")
 
+    # ---------- Token 管理 ----------
     async def _get_token(self):
         if self.token and self.token_expiry > time.time():
             return self.token
@@ -42,6 +44,7 @@ class DaidaiManagerPlugin(Star):
                 self.token = token
                 return token
 
+    # ---------- 通用 API 调用 ----------
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None):
         token = await self._get_token()
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
@@ -66,13 +69,18 @@ class DaidaiManagerPlugin(Star):
                 except:
                     return {"error": f"HTTP {resp.status}", "detail": response_text}
 
-    # ---------- 环境变量列表指令（只保留 /envlist） ----------
+    # ---------- 公共函数：获取环境变量列表数据 ----------
+    async def _fetch_env_list(self):
+        result = await self._call_api("envs?page=1&page_size=100", method="GET")
+        envs = result.get("data", [])
+        return envs
+
+    # ---------- 环境变量列表指令（多种别名） ----------
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
-        '''获取环境变量列表：/envlist'''
+        '''/envlist'''
         try:
-            result = await self._call_api("envs?page=1&page_size=100", method="GET")
-            envs = result.get("data", [])
+            envs = await self._fetch_env_list()
             if not envs:
                 yield event.plain_result("📭 当前没有环境变量")
             else:
@@ -90,7 +98,198 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 保留原有的运行脚本和运行任务指令（确保能正常工作） ----------
+    @filter.command("环境变量列表")
+    async def huanjingbianliangliebiao(self, event: AstrMessageEvent):
+        '''/环境变量列表'''
+        try:
+            envs = await self._fetch_env_list()
+            if not envs:
+                yield event.plain_result("📭 当前没有环境变量")
+            else:
+                msg = "📋 环境变量列表：\n"
+                for env in envs:
+                    name = env.get("name", "未命名")
+                    value = env.get("value", "")
+                    group = env.get("group", "默认分组")
+                    remarks = env.get("remarks", "")
+                    remarks_str = f" ({remarks})" if remarks else ""
+                    display_value = value if len(value) <= 50 else value[:50] + "..."
+                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
+                yield event.plain_result(msg)
+        except Exception as e:
+            logger.error(f"获取环境变量列表失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    @filter.command("变量列表")
+    async def bianliangliebiao(self, event: AstrMessageEvent):
+        '''/变量列表'''
+        try:
+            envs = await self._fetch_env_list()
+            if not envs:
+                yield event.plain_result("📭 当前没有环境变量")
+            else:
+                msg = "📋 环境变量列表：\n"
+                for env in envs:
+                    name = env.get("name", "未命名")
+                    value = env.get("value", "")
+                    group = env.get("group", "默认分组")
+                    remarks = env.get("remarks", "")
+                    remarks_str = f" ({remarks})" if remarks else ""
+                    display_value = value if len(value) <= 50 else value[:50] + "..."
+                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
+                yield event.plain_result(msg)
+        except Exception as e:
+            logger.error(f"获取环境变量列表失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    @filter.command("变量")
+    async def bianliang(self, event: AstrMessageEvent):
+        '''/变量'''
+        try:
+            envs = await self._fetch_env_list()
+            if not envs:
+                yield event.plain_result("📭 当前没有环境变量")
+            else:
+                msg = "📋 环境变量列表：\n"
+                for env in envs:
+                    name = env.get("name", "未命名")
+                    value = env.get("value", "")
+                    group = env.get("group", "默认分组")
+                    remarks = env.get("remarks", "")
+                    remarks_str = f" ({remarks})" if remarks else ""
+                    display_value = value if len(value) <= 50 else value[:50] + "..."
+                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
+                yield event.plain_result(msg)
+        except Exception as e:
+            logger.error(f"获取环境变量列表失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    @filter.command("envs")
+    async def envs(self, event: AstrMessageEvent):
+        '''/envs'''
+        try:
+            envs = await self._fetch_env_list()
+            if not envs:
+                yield event.plain_result("📭 当前没有环境变量")
+            else:
+                msg = "📋 环境变量列表：\n"
+                for env in envs:
+                    name = env.get("name", "未命名")
+                    value = env.get("value", "")
+                    group = env.get("group", "默认分组")
+                    remarks = env.get("remarks", "")
+                    remarks_str = f" ({remarks})" if remarks else ""
+                    display_value = value if len(value) <= 50 else value[:50] + "..."
+                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
+                yield event.plain_result(msg)
+        except Exception as e:
+            logger.error(f"获取环境变量列表失败: {e}")
+            yield event.plain_result(f"❌ 请求失败：{str(e)}")
+
+    # ---------- 辅助：获取环境变量 ID ----------
+    async def _get_env_id_by_name(self, env_name: str) -> int:
+        envs = await self._fetch_env_list()
+        for env in envs:
+            if env.get("name") == env_name:
+                return env.get("id")
+        return None
+
+    # ---------- 辅助：创建环境变量 ----------
+    async def _create_env(self, name: str, value: str, group: str = "默认分组") -> bool:
+        payload = {"name": name, "value": value, "group": group}
+        result = await self._call_api("envs", method="POST", data=payload)
+        if result.get("error") or result.get("code") not in [0, None, ""]:
+            logger.error(f"创建环境变量失败: {result}")
+            return False
+        return True
+
+    # ---------- 辅助：更新环境变量 ----------
+    async def _update_env(self, env_id: int, name: str, value: str) -> bool:
+        payload = {"name": name, "value": value}
+        result = await self._call_api(f"envs/{env_id}", method="PUT", data=payload)
+        if result.get("error") or result.get("code") not in [0, None, ""]:
+            logger.error(f"更新环境变量失败: {result}")
+            return False
+        return True
+
+    # ---------- 覆盖模式 ----------
+    async def _set_env(self, env_name: str, new_value: str, event):
+        env_id = await self._get_env_id_by_name(env_name)
+        if env_id is None:
+            if await self._create_env(env_name, new_value):
+                yield event.plain_result(f"✅ 环境变量 '{env_name}' 已创建，值为 '{new_value}'")
+            else:
+                yield event.plain_result(f"❌ 创建环境变量 '{env_name}' 失败")
+        else:
+            if await self._update_env(env_id, env_name, new_value):
+                yield event.plain_result(f"✅ 环境变量 '{env_name}' 已更新为 '{new_value}'")
+            else:
+                yield event.plain_result(f"❌ 更新环境变量 '{env_name}' 失败")
+
+    # ---------- 账户更新模式 ----------
+    async def _update_env_account(self, env_name: str, account: str, new_value: str, event):
+        env_id = await self._get_env_id_by_name(env_name)
+        if env_id is None:
+            initial = {account: new_value}
+            json_str = json.dumps(initial, ensure_ascii=False)
+            if await self._create_env(env_name, json_str):
+                yield event.plain_result(f"✅ 环境变量 '{env_name}' 已创建，账户 '{account}' 设为 '{new_value}'")
+            else:
+                yield event.plain_result(f"❌ 创建环境变量 '{env_name}' 失败")
+            return
+
+        # 获取当前值
+        envs = await self._fetch_env_list()
+        current_value = None
+        for env in envs:
+            if env.get("id") == env_id:
+                current_value = env.get("value", "")
+                break
+        if current_value is None:
+            yield event.plain_result("❌ 未找到该环境变量的当前值")
+            return
+
+        try:
+            data = json.loads(current_value) if current_value.strip() else {}
+        except json.JSONDecodeError:
+            yield event.plain_result(f"❌ 当前环境变量 '{env_name}' 的值不是 JSON 格式，无法按账户更新。请使用覆盖模式：/更新环境变量 {env_name} <新值>")
+            return
+
+        if not isinstance(data, dict):
+            yield event.plain_result(f"❌ 当前环境变量 '{env_name}' 的值不是对象格式，无法按账户更新")
+            return
+
+        data[account] = new_value
+        new_json_str = json.dumps(data, ensure_ascii=False)
+        if await self._update_env(env_id, env_name, new_json_str):
+            yield event.plain_result(f"✅ 环境变量 '{env_name}' 中账户 '{account}' 已更新为 '{new_value}'，其他账户保持不变")
+        else:
+            yield event.plain_result(f"❌ 更新环境变量 '{env_name}' 失败")
+
+    # ---------- 更新环境变量指令 ----------
+    @filter.command("更新环境变量")
+    async def update_env(self, event: AstrMessageEvent, *args):
+        '''
+        用法：
+        /更新环境变量 <变量名> <新值>                  → 覆盖整个变量
+        /更新环境变量 <变量名> <账户名> <新值>        → 更新 JSON 对象中的指定账户（其他不变）
+        '''
+        if len(args) < 2:
+            yield event.plain_result(
+                "❌ 用法：\n"
+                "  覆盖模式：/更新环境变量 <变量名> <新值>\n"
+                "  账户更新模式：/更新环境变量 <变量名> <账户名> <新值>"
+            )
+            return
+        env_name = args[0]
+        if len(args) == 2:
+            await self._set_env(env_name, args[1], event)
+        elif len(args) == 3:
+            await self._update_env_account(env_name, args[1], args[2], event)
+        else:
+            yield event.plain_result("❌ 参数过多，请检查格式。")
+
+    # ---------- 运行脚本 ----------
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
         try:
@@ -105,6 +304,7 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
+    # ---------- 运行任务 ----------
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
         try:
