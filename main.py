@@ -15,7 +15,7 @@ class DaidaiManagerPlugin(Star):
         self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
-        logger.info("✅ 呆呆面板插件已加载（增强解析版）")
+        logger.info("✅ 呆呆面板插件已加载（&分隔版）")
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -97,7 +97,7 @@ class DaidaiManagerPlugin(Star):
             return False
         return True
 
-    # ---------- 批量更新账户（返回成功/失败，不含计数） ----------
+    # ---------- 批量更新账户（保留原分隔符） ----------
     async def _update_env_accounts(self, env_name: str, accounts: dict) -> str:
         """
         accounts: { account1: new_value1, account2: new_value2, ... }
@@ -105,6 +105,7 @@ class DaidaiManagerPlugin(Star):
         """
         env_id = await self._get_env_id_by_name(env_name)
         if env_id is None:
+            # 新建变量，使用 & 分隔
             items = [f"{acc}#{val}" for acc, val in accounts.items()]
             initial = '&'.join(items)
             if await self._create_env(env_name, initial):
@@ -122,7 +123,7 @@ class DaidaiManagerPlugin(Star):
         if current_value is None:
             return "❌ 未找到该环境变量的当前值"
 
-        # 检测分隔符
+        # 检测原分隔符（优先换行，其次&）
         if '\n' in current_value:
             separator = '\n'
         elif '&' in current_value:
@@ -131,22 +132,25 @@ class DaidaiManagerPlugin(Star):
             separator = None
 
         if separator is None:
+            # 无分隔符，可能是单个账号
             if '#' in current_value:
                 parts = current_value.split('#', 1)
-                items = []
                 existing_acc = parts[0]
-                existing_val = parts[1]
+                # 如果当前账号在更新列表中，则更新，否则保留
+                items = []
                 if existing_acc in accounts:
                     items.append(f"{existing_acc}#{accounts[existing_acc]}")
                     accounts.pop(existing_acc)
                 else:
                     items.append(current_value)
+                # 追加其他新账户
                 for acc, val in accounts.items():
                     items.append(f"{acc}#{val}")
                 new_val = '&'.join(items)
             else:
                 return f"❌ 当前值不是账号格式，请使用覆盖模式：/更新环境变量 {env_name} <新值>"
         else:
+            # 有分隔符，按分隔符拆分
             items = current_value.split(separator)
             items = [item for item in items if item.strip()]
             new_items = []
@@ -160,6 +164,7 @@ class DaidaiManagerPlugin(Star):
                         new_items.append(item)
                 else:
                     new_items.append(item)
+            # 追加新增的账户
             for acc, val in accounts.items():
                 new_items.append(f"{acc}#{val}")
             new_val = separator.join(new_items)
@@ -169,7 +174,7 @@ class DaidaiManagerPlugin(Star):
         else:
             return "❌ 更新失败"
 
-    # ---------- 覆盖模式（单值） ----------
+    # ---------- 覆盖模式 ----------
     async def _set_env(self, env_name: str, new_value: str) -> str:
         env_id = await self._get_env_id_by_name(env_name)
         if env_id is None:
@@ -184,7 +189,7 @@ class DaidaiManagerPlugin(Star):
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
     # ========== 指令部分 ==========
-    # 环境变量列表（与之前相同，此处省略以节省篇幅，实际代码中应保留）
+    # 环境变量列表（多个别名）
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
         try:
@@ -290,7 +295,7 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    # ---------- 更新环境变量（增强解析） ----------
+    # ---------- 更新环境变量（使用 & 分隔多账户） ----------
     @filter.command("更新环境变量")
     async def update_env(self, event: AstrMessageEvent, env_name: str, new_value: str):
         '''
@@ -298,54 +303,60 @@ class DaidaiManagerPlugin(Star):
         覆盖模式：/更新环境变量 <变量名> <新值>（不包含#）
         账户更新模式：
           - 单账户：/更新环境变量 <变量名> <账号#新值>
-          - 多账户：/更新环境变量 <变量名> <账号1#值1\n账号2#值2\n...> 或使用 & 分隔
+          - 多账户：/更新环境变量 <变量名> <账号1#值1&账号2#值2&...>
         '''
         try:
-            # 处理可能的 \r\n
-            raw = new_value.replace('\r\n', '\n')
-            # 尝试按 \n 分割
-            lines = raw.split('\n') if '\n' in raw else []
-            # 如果按 \n 分割后只有一个元素且包含 &，则尝试按 & 分割
-            if len(lines) == 1 and '&' in raw:
-                lines = raw.split('&')
-            # 如果只有一个元素且包含 #，但可能被空格替换了换行，尝试按空格分割
-            if len(lines) == 1 and ' ' in raw and '#' in raw:
-                parts = raw.split()
-                if len(parts) > 1 and all('#' in p for p in parts):
-                    lines = parts
-            # 如果 lines 为空，则当作单行处理
-            if not lines:
-                lines = [raw]
-
-            accounts = {}
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                if '#' in line:
-                    parts = line.split('#', 1)
-                    acc = parts[0].strip()
-                    val = parts[1].strip() if len(parts) > 1 else ''
-                    if acc and val:
-                        accounts[acc] = val
+            # 优先按 & 分割，如果不含 & 则视为单个值
+            if '&' in new_value:
+                parts = new_value.split('&')
+                accounts = {}
+                for part in parts:
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if '#' in part:
+                        acc_val = part.split('#', 1)
+                        acc = acc_val[0].strip()
+                        val = acc_val[1].strip() if len(acc_val) > 1 else ''
+                        if acc and val:
+                            accounts[acc] = val
+                        else:
+                            yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
+                            return
                     else:
-                        yield event.plain_result(f"❌ 格式错误：'{line}' 缺少账号或值")
+                        # 如果某部分没有 #，视为覆盖模式
+                        msg = await self._set_env(env_name, new_value)
+                        yield event.plain_result(msg)
                         return
+                if accounts:
+                    msg = await self._update_env_accounts(env_name, accounts)
+                    if "✅" in msg:
+                        yield event.plain_result(f"检测到 {len(accounts)} 个账户，{msg}")
+                    else:
+                        yield event.plain_result(msg)
                 else:
-                    # 如果没有 #，则可能是覆盖模式，但用户期望账户更新，我们视为错误
-                    yield event.plain_result(f"❌ 格式错误：'{line}' 缺少 # 分隔符")
-                    return
-
-            if accounts:
-                # 调用批量更新方法（不包含计数）
-                msg = await self._update_env_accounts(env_name, accounts)
-                # 在回复中显示检测到的账户数
-                if "✅" in msg:
-                    yield event.plain_result(f"检测到 {len(accounts)} 个账户，{msg}")
-                else:
-                    yield event.plain_result(msg)  # 失败时直接显示
+                    yield event.plain_result("❌ 未检测到有效的账户更新条目")
             else:
-                yield event.plain_result("❌ 未检测到有效的账户更新条目")
+                # 不包含 &，可能是单账户或覆盖
+                if '#' in new_value:
+                    # 单账户
+                    acc_val = new_value.split('#', 1)
+                    acc = acc_val[0].strip()
+                    val = acc_val[1].strip() if len(acc_val) > 1 else ''
+                    if acc and val:
+                        msg = await self._update_env_accounts(env_name, {acc: val})
+                        if "✅" in msg:
+                            yield event.plain_result(f"检测到 1 个账户，{msg}")
+                        else:
+                            yield event.plain_result(msg)
+                    else:
+                        # 格式不完整，视为覆盖
+                        msg = await self._set_env(env_name, new_value)
+                        yield event.plain_result(msg)
+                else:
+                    # 覆盖模式
+                    msg = await self._set_env(env_name, new_value)
+                    yield event.plain_result(msg)
         except Exception as e:
             logger.error(f"更新环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
