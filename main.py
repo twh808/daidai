@@ -10,7 +10,8 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        self.base_url = config.get("base_url", "http://192.168.5.1:5777/api/v1")
+        # 默认地址改为通用本地地址，实际使用时在插件配置中填写
+        self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
         self.app_key = config.get("app_key", "")
         self.app_secret = config.get("app_secret", "")
         self.token = None
@@ -23,7 +24,10 @@ class DaidaiManagerPlugin(Star):
         if self.token and self.token_expiry > time.time():
             return self.token
 
-        token_url = f"http://192.168.5.1:5777/api/open-api/token"
+        token_url = f"http://127.0.0.1:5700/api/open-api/token"  # 注意：token 接口也在同一地址，用户需配置 base_url，但为了灵活性，我们使用配置的 base_url 构造
+        # 改进：使用 self.base_url 构造 token_url
+        base = self.base_url.replace("/api/v1", "").replace("/api", "")
+        token_url = f"{base}/api/open-api/token"
         payload = {
             "app_key": self.app_key,
             "app_secret": self.app_secret
@@ -178,11 +182,12 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ---------- 交互会话处理 ----------
+    # ---------- 交互会话处理（改为普通异步函数） ----------
     async def _handle_interactive_input(self, event: AstrMessageEvent):
+        """处理交互输入，返回 (handled, message)"""
         user_id = str(event.get_sender_id())
         if user_id not in self.sessions:
-            return False
+            return False, ""
 
         session = self.sessions[user_id]
         action = session.get('action')
@@ -191,15 +196,13 @@ class DaidaiManagerPlugin(Star):
 
         if content == '/取消':
             del self.sessions[user_id]
-            yield event.plain_result("🔄 已取消当前交互操作")
-            return True
+            return True, "🔄 已取消当前交互操作"
 
         if action == 'update':
             if step == 'env_name':
                 session['env_name'] = content
                 session['step'] = 'new_value'
-                yield event.plain_result(f"📝 请输入变量 '{content}' 的新值（支持多账户格式：账号#值&账号2#值2）")
-                return True
+                return True, f"📝 请输入变量 '{content}' 的新值（支持多账户格式：账号#值&账号2#值2）"
             elif step == 'new_value':
                 env_name = session['env_name']
                 new_value = content
@@ -219,17 +222,15 @@ class DaidaiManagerPlugin(Star):
                                 if acc and val:
                                     accounts[acc] = val
                                 else:
-                                    yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
-                                    return True
+                                    return True, f"❌ 格式错误：'{part}' 缺少账号或值"
                             else:
-                                yield event.plain_result(f"❌ 格式错误：'{part}' 缺少 # 分隔符")
-                                return True
+                                return True, f"❌ 格式错误：'{part}' 缺少 # 分隔符"
                         if accounts:
                             msg, count = await self._update_env_accounts(env_name, accounts)
                             result_msg = f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
-                            yield event.plain_result(result_msg)
+                            return True, result_msg
                         else:
-                            yield event.plain_result("❌ 未检测到有效的账户更新条目")
+                            return True, "❌ 未检测到有效的账户更新条目"
                     else:
                         if '#' in raw:
                             acc_val = raw.split('#', 1)
@@ -238,18 +239,18 @@ class DaidaiManagerPlugin(Star):
                             if acc and val:
                                 msg, count = await self._update_env_accounts(env_name, {acc: val})
                                 result_msg = f"检测到 {count} 个账户，{msg}" if "✅" in msg else msg
-                                yield event.plain_result(result_msg)
+                                return True, result_msg
                             else:
                                 msg = await self._set_env(env_name, raw)
-                                yield event.plain_result(msg)
+                                return True, msg
                         else:
                             msg = await self._set_env(env_name, raw)
-                            yield event.plain_result(msg)
+                            return True, msg
                 except Exception as e:
                     logger.error(f"交互更新失败: {e}")
-                    yield event.plain_result(f"❌ 更新失败：{str(e)}")
-                del self.sessions[user_id]
-                return True
+                    return True, f"❌ 更新失败：{str(e)}"
+                finally:
+                    del self.sessions[user_id]
 
         elif action == 'script':
             if step == 'script_path':
@@ -259,14 +260,14 @@ class DaidaiManagerPlugin(Star):
                     result = await self._call_api("scripts/run", data=payload)
                     if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                         error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
-                        yield event.plain_result(f"❌ 运行失败：{error_msg}")
+                        return True, f"❌ 运行失败：{error_msg}"
                     else:
-                        yield event.plain_result(f"✅ 脚本已成功执行！")
+                        return True, "✅ 脚本已成功执行！"
                 except Exception as e:
                     logger.error(f"交互运行脚本失败: {e}")
-                    yield event.plain_result(f"❌ 运行失败：{str(e)}")
-                del self.sessions[user_id]
-                return True
+                    return True, f"❌ 运行失败：{str(e)}"
+                finally:
+                    del self.sessions[user_id]
 
         elif action == 'task':
             if step == 'task_name':
@@ -275,41 +276,41 @@ class DaidaiManagerPlugin(Star):
                     result = await self._call_api("tasks?page=1&page_size=100", method="GET")
                     tasks = result.get("data")
                     if not tasks or not isinstance(tasks, list):
-                        yield event.plain_result("❌ 获取任务列表失败")
                         del self.sessions[user_id]
-                        return True
+                        return True, "❌ 获取任务列表失败"
                     task_id = None
                     for task in tasks:
                         if task.get("name") == task_name:
                             task_id = task.get("id")
                             break
                     if task_id is None:
-                        yield event.plain_result(f"❌ 未找到名称为 '{task_name}' 的任务")
                         del self.sessions[user_id]
-                        return True
+                        return True, f"❌ 未找到名称为 '{task_name}' 的任务"
 
                     result = await self._call_api(f"tasks/{task_id}/run", method="PUT", data={})
                     if result.get("error") or result.get("code") not in [0, None, ""] or result.get("status") == "error":
                         error_msg = result.get("msg") or result.get("message") or result.get("error") or str(result)
-                        yield event.plain_result(f"❌ 运行任务失败：{error_msg}")
+                        return True, f"❌ 运行任务失败：{error_msg}"
                     else:
                         message = result.get("message", "任务已启动")
-                        yield event.plain_result(f"✅ {message}")
+                        return True, f"✅ {message}"
                 except Exception as e:
                     logger.error(f"交互运行任务失败: {e}")
-                    yield event.plain_result(f"❌ 运行失败：{str(e)}")
-                del self.sessions[user_id]
-                return True
+                    return True, f"❌ 运行失败：{str(e)}"
+                finally:
+                    del self.sessions[user_id]
 
+        # 未知动作，清理会话
         del self.sessions[user_id]
-        return True
+        return True, "❌ 未知交互操作，已取消"
 
     @filter.on_message()
     async def on_message(self, event: AstrMessageEvent):
         user_id = str(event.get_sender_id())
         if user_id in self.sessions:
-            async for result in self._handle_interactive_input(event):
-                yield result
+            handled, msg = await self._handle_interactive_input(event)
+            if handled:
+                yield event.plain_result(msg)
             return
 
     # ========== 交互式指令 ==========
