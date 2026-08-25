@@ -16,14 +16,16 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
 
-        # 关键修正：直接使用 self.name（由基类自动注入，与 metadata.yaml 中的 name 一致）
-        self.plugin_name = self.name  # 应为 "呆呆面板管理"
+        # 强制使用与 metadata.yaml 中完全一致的名称
+        self.plugin_name = "呆呆面板管理"
         logger.info(f"✅ 呆呆面板插件已加载（插件名: {self.plugin_name}）")
 
-    # ---------- 动态管理员验证（修正版，加强日志和校验） ----------
+    # ---------- 动态管理员验证（增强版） ----------
     async def _is_admin(self, event: AstrMessageEvent) -> bool:
+        # 1. 获取插件配置
         try:
             plugin_config = self.context.get_plugin_config(self.plugin_name)
+            logger.info(f"读取到插件配置: {plugin_config}")  # 打印完整配置
             if plugin_config:
                 admin_qq = plugin_config.get("admin_qq")
             else:
@@ -32,24 +34,32 @@ class DaidaiManagerPlugin(Star):
             logger.warning(f"读取插件配置失败: {e}")
             admin_qq = None
 
-        # 未配置管理员 => 允许所有用户（如需更严格可改为 return False）
-        if not admin_qq:
-            logger.info("未配置管理员QQ，所有用户均允许使用。")
+        # 2. 如果配置中根本没有 admin_qq 字段，则允许所有用户（兼容未配置的情况）
+        if admin_qq is None:
+            logger.info("配置中未设置 admin_qq，所有用户均允许使用。")
             return True
 
-        # 解析管理员列表
+        # 3. 解析管理员列表（支持字符串逗号分隔或列表）
         if isinstance(admin_qq, str):
+            # 去除可能存在的空格，并按逗号分割
             admin_qqs = [qq.strip() for qq in admin_qq.split(',') if qq.strip()]
         elif isinstance(admin_qq, list):
-            admin_qqs = [str(qq) for qq in admin_qq if qq]
+            admin_qqs = [str(qq).strip() for qq in admin_qq if qq]
         else:
             admin_qqs = []
+
+        # 如果解析后列表为空（即配置了空字符串或无效格式），则禁止所有用户（安全）
+        if not admin_qqs:
+            logger.warning("配置了 admin_qq 但解析后为空，已禁止所有用户使用。")
+            return False
 
         sender = str(event.get_sender_id())
         logger.info(f"管理员列表: {admin_qqs}, 发送者: {sender}")
         is_admin = sender in admin_qqs
         if not is_admin:
             logger.warning(f"非管理员用户 {sender} 尝试使用命令，已拦截。")
+        else:
+            logger.info(f"管理员 {sender} 通过验证。")
         return is_admin
 
     # ---------- Token 管理 ----------
