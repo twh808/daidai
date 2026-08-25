@@ -1,8 +1,25 @@
-name: 呆呆面板管理          # 插件名，与仓库名一致
-desc: 通过QQ机器人管理呆呆面板                  # 插件描述
-author: 一休哥                              # 作者
-version: 1.2.0                            # 版本号
-repo: https://github.com/twh808/daidai/tree/master    # 仓库地址
-support_platforms:                           # 声明支持的平台[reference:5]
-  - aiocqhttp                                # NapCat/OneBot 协议
-astrbot_version: ">=4.16,<5"                # 声明兼容的AstrBot版本[reference:6]
+name: 呆呆面板管理
+desc: 通过QQ机器人管理呆呆面板
+author: 一休哥
+version: "1.2.0"          # 版本号务必用引号括起来
+repo: https://github.com/twh808/daidai/tree/master
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.16,<5"
+config:
+  - name: base_url
+    type: string
+    default: http://127.0.0.1:5700/api/v1
+    description: 呆呆面板API基础地址（需包含 /api/v1）
+  - name: app_key
+    type: string
+    default: ""
+    description: 应用Key（在呆呆面板后台获取）
+  - name: app_secret
+    type: string
+    default: ""
+    description: 应用密钥
+  - name: admin_qq
+    type: string
+    default: ""
+    description: 管理员QQ号，多个用英文逗号分隔（例如：123456,789012），留空则允许所有人使用命令
