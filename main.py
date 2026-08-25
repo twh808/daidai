@@ -10,22 +10,21 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        # 使用中文配置键名
-        self.base_url = config.get("呆呆面板API地址", "http://127.0.0.1:5700/api/v1")
-        self.app_key = config.get("呆呆面板的AppKey", "")
-        self.app_secret = config.get("呆呆面板的AppSecret", "")
+        self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
+        self.app_key = config.get("app_key", "")
+        self.app_secret = config.get("app_secret", "")
         self.token = None
         self.token_expiry = 0
 
         self.plugin_name = getattr(self, 'name', '呆呆面板管理')
         logger.info(f"✅ 呆呆面板插件已加载（插件名: {self.plugin_name}）")
 
-    # ---------- 动态管理员验证（使用中文键名） ----------
+    # ---------- 动态管理员验证 ----------
     async def _is_admin(self, event: AstrMessageEvent) -> bool:
         try:
             plugin_config = self.context.get_plugin_config(self.plugin_name)
             if plugin_config:
-                admin_qq = plugin_config.get("管理员QQ号")
+                admin_qq = plugin_config.get("admin_qq")
             else:
                 admin_qq = None
         except Exception as e:
@@ -33,7 +32,7 @@ class DaidaiManagerPlugin(Star):
             admin_qq = None
 
         if not admin_qq:
-            return True
+            return True   # 未配置则允许所有人
 
         if isinstance(admin_qq, str):
             admin_qqs = [qq.strip() for qq in admin_qq.split(',') if qq.strip()]
