@@ -7,19 +7,15 @@ support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.16,<5"
 config:
-  - name: 呆呆面板API地址
-    type: string
-    default: http://127.0.0.1:5700/api/v1
-    description: 例如：http://127.0.0.1:5700/api/v1
-  - name: 呆呆面板的AppKey
-    type: string
+  - name: base_url
+    desc: 呆呆面板API地址
+    default: "http://127.0.0.1:5700/api/v1"
+  - name: app_key
+    desc: 呆呆面板的AppKey
     default: ""
-    description: 在呆呆面板后台 -> 系统设置 -> OpenAPI 中获取
-  - name: 呆呆面板的AppSecret
-    type: string
+  - name: app_secret
+    desc: 呆呆面板的AppSecret
     default: ""
-    description: 在呆呆面板后台 -> 系统设置 -> OpenAPI 中获取
-  - name: 管理员QQ号
-    type: string
+  - name: admin_qq
+    desc: 管理员QQ号，多个用英文逗号分隔
     default: ""
-    description: 多个用英文逗号分隔（例如：123456789,987654321），留空则允许所有人使用命令
