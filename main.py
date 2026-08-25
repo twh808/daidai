@@ -16,51 +16,27 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
 
-        # 强制使用与 metadata.yaml 中完全一致的名称
-        self.plugin_name = "呆呆面板管理"
-        logger.info(f"✅ 呆呆面板插件已加载（插件名: {self.plugin_name}）")
+        # ---------- 管理员配置（初始化时读取，与 kuwo_manager 一致） ----------
+        admin_str = config.get("admin_qq", "").strip()
+        self.admin_qqs = [qq.strip() for qq in admin_str.split(',') if qq.strip()]
+        if self.admin_qqs:
+            logger.info(f"✅ 呆呆面板管理 - 管理员已配置: {self.admin_qqs}")
+        else:
+            logger.info("ℹ️ 呆呆面板管理 - 未配置管理员，所有用户均可使用")
 
-    # ---------- 动态管理员验证（增强版） ----------
-    async def _is_admin(self, event: AstrMessageEvent) -> bool:
-        # 1. 获取插件配置
+        logger.info("✅ 呆呆面板插件已加载")
+
+    # ---------- 权限检查辅助方法（同步） ----------
+    def _is_admin(self, event: AstrMessageEvent) -> bool:
+        """检查发送者是否在管理员列表中"""
+        if not self.admin_qqs:
+            return True  # 未配置管理员则允许所有人
         try:
-            plugin_config = self.context.get_plugin_config(self.plugin_name)
-            logger.info(f"读取到插件配置: {plugin_config}")  # 打印完整配置
-            if plugin_config:
-                admin_qq = plugin_config.get("admin_qq")
-            else:
-                admin_qq = None
-        except Exception as e:
-            logger.warning(f"读取插件配置失败: {e}")
-            admin_qq = None
-
-        # 2. 如果配置中根本没有 admin_qq 字段，则允许所有用户（兼容未配置的情况）
-        if admin_qq is None:
-            logger.info("配置中未设置 admin_qq，所有用户均允许使用。")
-            return True
-
-        # 3. 解析管理员列表（支持字符串逗号分隔或列表）
-        if isinstance(admin_qq, str):
-            # 去除可能存在的空格，并按逗号分割
-            admin_qqs = [qq.strip() for qq in admin_qq.split(',') if qq.strip()]
-        elif isinstance(admin_qq, list):
-            admin_qqs = [str(qq).strip() for qq in admin_qq if qq]
-        else:
-            admin_qqs = []
-
-        # 如果解析后列表为空（即配置了空字符串或无效格式），则禁止所有用户（安全）
-        if not admin_qqs:
-            logger.warning("配置了 admin_qq 但解析后为空，已禁止所有用户使用。")
-            return False
-
-        sender = str(event.get_sender_id())
-        logger.info(f"管理员列表: {admin_qqs}, 发送者: {sender}")
-        is_admin = sender in admin_qqs
-        if not is_admin:
-            logger.warning(f"非管理员用户 {sender} 尝试使用命令，已拦截。")
-        else:
-            logger.info(f"管理员 {sender} 通过验证。")
-        return is_admin
+            sender = str(event.get_sender_id())
+        except:
+            # 兼容其他平台
+            sender = str(event.get_user_id()) if hasattr(event, 'get_user_id') else "unknown"
+        return sender in self.admin_qqs
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
@@ -222,7 +198,7 @@ class DaidaiManagerPlugin(Star):
     # ========== 指令部分（均添加管理员验证） ==========
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -246,7 +222,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("环境变量列表")
     async def huanjingbianliangliebiao(self, event: AstrMessageEvent):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -270,7 +246,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量列表")
     async def bianliangliebiao(self, event: AstrMessageEvent):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -294,7 +270,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("变量")
     async def bianliang(self, event: AstrMessageEvent):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -318,7 +294,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("envs")
     async def envs(self, event: AstrMessageEvent):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -342,7 +318,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("更新环境变量")
     async def update_env_old(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -397,7 +373,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("更新变量")
     async def update_env_new(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -452,7 +428,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("运行脚本")
     async def run_script(self, event: AstrMessageEvent, script_path: str):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
@@ -469,7 +445,7 @@ class DaidaiManagerPlugin(Star):
 
     @filter.command("运行任务")
     async def run_task(self, event: AstrMessageEvent, task_name: str):
-        if not await self._is_admin(event):
+        if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         try:
