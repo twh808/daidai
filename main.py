@@ -16,10 +16,11 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
 
-        self.plugin_name = getattr(self, 'name', '呆呆面板管理')
+        # 关键修正：直接使用 self.name（由基类自动注入，与 metadata.yaml 中的 name 一致）
+        self.plugin_name = self.name  # 应为 "呆呆面板管理"
         logger.info(f"✅ 呆呆面板插件已加载（插件名: {self.plugin_name}）")
 
-    # ---------- 动态管理员验证 ----------
+    # ---------- 动态管理员验证（修正版，加强日志和校验） ----------
     async def _is_admin(self, event: AstrMessageEvent) -> bool:
         try:
             plugin_config = self.context.get_plugin_config(self.plugin_name)
@@ -31,9 +32,12 @@ class DaidaiManagerPlugin(Star):
             logger.warning(f"读取插件配置失败: {e}")
             admin_qq = None
 
+        # 未配置管理员 => 允许所有用户（如需更严格可改为 return False）
         if not admin_qq:
-            return True   # 未配置则允许所有人
+            logger.info("未配置管理员QQ，所有用户均允许使用。")
+            return True
 
+        # 解析管理员列表
         if isinstance(admin_qq, str):
             admin_qqs = [qq.strip() for qq in admin_qq.split(',') if qq.strip()]
         elif isinstance(admin_qq, list):
@@ -42,7 +46,11 @@ class DaidaiManagerPlugin(Star):
             admin_qqs = []
 
         sender = str(event.get_sender_id())
-        return sender in admin_qqs
+        logger.info(f"管理员列表: {admin_qqs}, 发送者: {sender}")
+        is_admin = sender in admin_qqs
+        if not is_admin:
+            logger.warning(f"非管理员用户 {sender} 尝试使用命令，已拦截。")
+        return is_admin
 
     # ---------- Token 管理 ----------
     async def _get_token(self):
