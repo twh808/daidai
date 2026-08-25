@@ -10,38 +10,32 @@ class DaidaiManagerPlugin(Star):
         super().__init__(context)
         if config is None:
             config = {}
-        self.base_url = config.get("base_url", "http://127.0.0.1:5700/api/v1")
-        self.app_key = config.get("app_key", "")
-        self.app_secret = config.get("app_secret", "")
+        # 使用中文配置键名
+        self.base_url = config.get("呆呆面板API地址", "http://127.0.0.1:5700/api/v1")
+        self.app_key = config.get("呆呆面板的AppKey", "")
+        self.app_secret = config.get("呆呆面板的AppSecret", "")
         self.token = None
         self.token_expiry = 0
 
-        # 插件名称（用于动态读取配置，通常与安装目录名或 metadata.name 一致）
-        # 如果 self.name 不可用，可改为硬编码 "呆呆面板管理"
         self.plugin_name = getattr(self, 'name', '呆呆面板管理')
         logger.info(f"✅ 呆呆面板插件已加载（插件名: {self.plugin_name}）")
 
-    # ---------- 动态管理员验证（每次调用实时读取配置） ----------
+    # ---------- 动态管理员验证（使用中文键名） ----------
     async def _is_admin(self, event: AstrMessageEvent) -> bool:
-        """检查发送者是否为管理员，配置在仪表盘可动态修改"""
         try:
-            # 获取当前插件配置（仪表盘修改后立即生效）
             plugin_config = self.context.get_plugin_config(self.plugin_name)
             if plugin_config:
-                admin_qq = plugin_config.get("admin_qq")
+                admin_qq = plugin_config.get("管理员QQ号")
             else:
                 admin_qq = None
         except Exception as e:
             logger.warning(f"读取插件配置失败: {e}")
             admin_qq = None
 
-        # 若未配置管理员，则允许所有用户（可根据需要改为 False）
         if not admin_qq:
             return True
 
-        # 解析管理员列表
         if isinstance(admin_qq, str):
-            # 支持逗号分隔，如 "123456,789012"
             admin_qqs = [qq.strip() for qq in admin_qq.split(',') if qq.strip()]
         elif isinstance(admin_qq, list):
             admin_qqs = [str(qq) for qq in admin_qq if qq]
@@ -130,7 +124,6 @@ class DaidaiManagerPlugin(Star):
             return False
         return True
 
-    # ---------- 批量更新账户 ----------
     async def _update_env_accounts(self, env_name: str, accounts: dict) -> tuple:
         total = len(accounts)
         env_id = await self._get_env_id_by_name(env_name)
@@ -212,7 +205,6 @@ class DaidaiManagerPlugin(Star):
     # ========== 指令部分（均添加管理员验证） ==========
     @filter.command("envlist")
     async def envlist(self, event: AstrMessageEvent):
-        """查看呆呆面板中的所有环境变量列表"""
         if not await self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
