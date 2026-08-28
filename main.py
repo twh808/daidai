@@ -16,7 +16,6 @@ class DaidaiManagerPlugin(Star):
         self.token = None
         self.token_expiry = 0
 
-        # ---------- 管理员配置（初始化时读取，与 kuwo_manager 一致） ----------
         admin_str = config.get("admin_qq", "").strip()
         self.admin_qqs = [qq.strip() for qq in admin_str.split(',') if qq.strip()]
         if self.admin_qqs:
@@ -24,38 +23,31 @@ class DaidaiManagerPlugin(Star):
         else:
             logger.info("ℹ️ 呆呆面板管理 - 未配置管理员，所有用户均可使用")
 
-        logger.info("✅ 呆呆面板插件已加载")
+        logger.info("✅ 呆呆面板插件已加载（无斜杠交互版）")
 
-    # ---------- 权限检查辅助方法（同步） ----------
+    # ---------- 权限检查 ----------
     def _is_admin(self, event: AstrMessageEvent) -> bool:
-        """检查发送者是否在管理员列表中"""
         if not self.admin_qqs:
-            return True  # 未配置管理员则允许所有人
+            return True
         try:
             sender = str(event.get_sender_id())
         except:
-            # 兼容其他平台
             sender = str(event.get_user_id()) if hasattr(event, 'get_user_id') else "unknown"
         return sender in self.admin_qqs
 
-    # ---------- Token 管理 ----------
+    # ---------- Token & API ----------
     async def _get_token(self):
         if self.token and self.token_expiry > time.time():
             return self.token
-
         base = self.base_url.replace("/api/v1", "").replace("/api", "")
         token_url = f"{base}/api/open-api/token"
-        payload = {
-            "app_key": self.app_key,
-            "app_secret": self.app_secret
-        }
+        payload = {"app_key": self.app_key, "app_secret": self.app_secret}
         async with aiohttp.ClientSession() as session:
             async with session.post(token_url, json=payload) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     raise Exception(f"获取 Token 失败，状态码：{resp.status}，响应：{error_text}")
                 result = await resp.json()
-                logger.info(f"Token 响应: {result}")
                 token = result.get("data", {}).get("access_token")
                 if not token:
                     raise Exception(f"Token 响应中未找到 access_token 字段：{result}")
@@ -64,22 +56,13 @@ class DaidaiManagerPlugin(Star):
                 self.token = token
                 return token
 
-    # ---------- 通用 API 调用 ----------
     async def _call_api(self, endpoint: str, method: str = "POST", data: dict = None):
         token = await self._get_token()
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}"
-        }
-        logger.info(f"请求 URL: {url}")
-        logger.info(f"请求方法: {method}")
-        logger.info(f"请求体: {data}")
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
         async with aiohttp.ClientSession() as session:
             async with session.request(method, url, headers=headers, json=data) as resp:
                 response_text = await resp.text()
-                logger.info(f"响应状态码: {resp.status}")
-                logger.info(f"响应内容: {response_text}")
                 if resp.status == 401:
                     self.token = None
                     self.token_expiry = 0
@@ -89,7 +72,7 @@ class DaidaiManagerPlugin(Star):
                 except:
                     return {"error": f"HTTP {resp.status}", "detail": response_text}
 
-    # ---------- 公共函数 ----------
+    # ---------- 环境变量核心函数 ----------
     async def _fetch_env_list(self):
         result = await self._call_api("envs?page=1&page_size=100", method="GET")
         return result.get("data", [])
@@ -195,12 +178,111 @@ class DaidaiManagerPlugin(Star):
             else:
                 return f"❌ 更新环境变量 '{env_name}' 失败"
 
-    # ========== 指令部分（均添加管理员验证） ==========
-    @filter.command("envlist")
-    async def envlist(self, event: AstrMessageEvent):
+    # ---------- 帮助菜单 ----------
+    def _get_help_text(self) -> str:
+        return """🤖 **呆呆面板管理插件帮助**
+
+发送以下命令（无需斜杠）进行操作：
+
+**环境变量管理：**
+  - `呆呆 环境变量 列表` – 查看所有变量
+  - `呆呆 更新变量 <变量名> <账号#值>` – 更新单账号
+  - `呆呆 更新变量 <变量名>`（换行输入多个账号） – 批量更新，每行一个 `账号#值`
+  - `呆呆 覆盖变量 <变量名> <新值>` – 覆盖整个变量值
+
+**脚本管理：**
+  - `呆呆 运行脚本 <脚本绝对路径>` – 执行指定脚本
+
+**任务管理：**
+  - `呆呆 运行任务 <任务名称>` – 运行指定定时任务
+
+💡 **示例：**
+  - `呆呆 环境变量 列表`
+  - `呆呆 更新变量 CODE 13800138000#123456`
+  - 批量更新：
+    ```
+    呆呆 更新变量 CODE
+    账号1#值1
+    账号2#值2
+    ```
+  - `呆呆 运行脚本 /data/scripts/cleanup.sh`
+
+⚠️ 只有管理员QQ可使用所有命令。"""
+
+    # ========== 纯文本入口：发送“呆呆管理”唤出菜单 ==========
+    @filter.message(关键字="呆呆管理")
+    async def daidai_menu(self, event: AstrMessageEvent):
         if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
+        yield event.plain_result(self._get_help_text())
+
+    # ========== 统一消息处理器：解析以“呆呆”开头的命令 ==========
+    @filter.message()
+    async def daidai_command_handler(self, event: AstrMessageEvent):
+        message = event.message_str.strip()
+        if not message.startswith("呆呆 "):
+            return
+
+        if not self._is_admin(event):
+            yield event.plain_result("⚠️ 您没有权限使用此命令。")
+            return
+
+        content = message[3:].strip()
+        if not content:
+            yield event.plain_result("❌ 请输入子命令，例如：呆呆 环境变量 列表")
+            return
+
+        first_space = content.find(' ')
+        if first_space == -1:
+            cmd = content
+            args = ""
+        else:
+            cmd = content[:first_space]
+            args = content[first_space+1:].strip()
+
+        if cmd == "环境变量" and args.startswith("列表"):
+            await self._list_envs(event)
+        elif cmd == "更新变量":
+            if not args:
+                yield event.plain_result("❌ 请指定变量名，例如：呆呆 更新变量 CODE 账号#值")
+                return
+            second_space = args.find(' ')
+            if second_space == -1:
+                yield event.plain_result("❌ 请提供账号#值，例如：呆呆 更新变量 CODE 13800138000#123456")
+                return
+            env_name = args[:second_space]
+            new_value = args[second_space+1:].strip()
+            if not new_value:
+                yield event.plain_result("❌ 请提供账号#值")
+                return
+            await self._update_env_cmd(event, env_name, new_value)
+        elif cmd == "覆盖变量":
+            if not args:
+                yield event.plain_result("❌ 请指定变量名和新值")
+                return
+            second_space = args.find(' ')
+            if second_space == -1:
+                yield event.plain_result("❌ 请提供新值")
+                return
+            env_name = args[:second_space]
+            new_value = args[second_space+1:].strip()
+            await self._set_env_cmd(event, env_name, new_value)
+        elif cmd == "运行脚本":
+            if not args:
+                yield event.plain_result("❌ 请指定脚本路径")
+                return
+            await self._run_script_cmd(event, args)
+        elif cmd == "运行任务":
+            if not args:
+                yield event.plain_result("❌ 请指定任务名称")
+                return
+            await self._run_task_cmd(event, args)
+        else:
+            yield event.plain_result(f"❌ 未知命令。发送 `呆呆管理` 查看帮助。")
+
+    # ---------- 具体命令实现 ----------
+    async def _list_envs(self, event: AstrMessageEvent):
         try:
             envs = await self._fetch_env_list()
             if not envs:
@@ -220,217 +302,82 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"获取环境变量列表失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    @filter.command("环境变量列表")
-    async def huanjingbianliangliebiao(self, event: AstrMessageEvent):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
+    async def _update_env_cmd(self, event: AstrMessageEvent, env_name: str, new_value: str):
         try:
-            envs = await self._fetch_env_list()
-            if not envs:
-                yield event.plain_result("📭 当前没有环境变量")
-            else:
-                msg = "📋 环境变量列表：\n"
-                for env in envs:
-                    name = env.get("name", "未命名")
-                    value = env.get("value", "")
-                    group = env.get("group", "默认分组")
-                    remarks = env.get("remarks", "")
-                    remarks_str = f" ({remarks})" if remarks else ""
-                    display_value = value if len(value) <= 50 else value[:50] + "..."
-                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
-                yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"获取环境变量列表失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    @filter.command("变量列表")
-    async def bianliangliebiao(self, event: AstrMessageEvent):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
-        try:
-            envs = await self._fetch_env_list()
-            if not envs:
-                yield event.plain_result("📭 当前没有环境变量")
-            else:
-                msg = "📋 环境变量列表：\n"
-                for env in envs:
-                    name = env.get("name", "未命名")
-                    value = env.get("value", "")
-                    group = env.get("group", "默认分组")
-                    remarks = env.get("remarks", "")
-                    remarks_str = f" ({remarks})" if remarks else ""
-                    display_value = value if len(value) <= 50 else value[:50] + "..."
-                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
-                yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"获取环境变量列表失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    @filter.command("变量")
-    async def bianliang(self, event: AstrMessageEvent):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
-        try:
-            envs = await self._fetch_env_list()
-            if not envs:
-                yield event.plain_result("📭 当前没有环境变量")
-            else:
-                msg = "📋 环境变量列表：\n"
-                for env in envs:
-                    name = env.get("name", "未命名")
-                    value = env.get("value", "")
-                    group = env.get("group", "默认分组")
-                    remarks = env.get("remarks", "")
-                    remarks_str = f" ({remarks})" if remarks else ""
-                    display_value = value if len(value) <= 50 else value[:50] + "..."
-                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
-                yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"获取环境变量列表失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    @filter.command("envs")
-    async def envs(self, event: AstrMessageEvent):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
-        try:
-            envs = await self._fetch_env_list()
-            if not envs:
-                yield event.plain_result("📭 当前没有环境变量")
-            else:
-                msg = "📋 环境变量列表：\n"
-                for env in envs:
-                    name = env.get("name", "未命名")
-                    value = env.get("value", "")
-                    group = env.get("group", "默认分组")
-                    remarks = env.get("remarks", "")
-                    remarks_str = f" ({remarks})" if remarks else ""
-                    display_value = value if len(value) <= 50 else value[:50] + "..."
-                    msg += f"- ID: {env.get('id')} | {name} = {display_value} | 分组: {group}{remarks_str}\n"
-                yield event.plain_result(msg)
-        except Exception as e:
-            logger.error(f"获取环境变量列表失败: {e}")
-            yield event.plain_result(f"❌ 请求失败：{str(e)}")
-
-    @filter.command("更新环境变量")
-    async def update_env_old(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
-        try:
-            raw = new_value.replace('\n', '').replace('\r', '').strip()
-            if '&' in raw:
-                parts = raw.split('&')
-                accounts = {}
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-                    if '#' in part:
-                        acc_val = part.split('#', 1)
-                        acc = acc_val[0].strip()
-                        val = acc_val[1].strip() if len(acc_val) > 1 else ''
+            raw = new_value.replace('\r', '').strip()
+            lines = [line.strip() for line in raw.split('\n') if line.strip()]
+            accounts = {}
+            if len(lines) > 1:
+                for line in lines:
+                    if '#' in line:
+                        acc, val = line.split('#', 1)
+                        acc = acc.strip()
+                        val = val.strip()
                         if acc and val:
                             accounts[acc] = val
                         else:
-                            yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
+                            yield event.plain_result(f"❌ 格式错误：'{line}' 缺少账号或值")
                             return
                     else:
-                        yield event.plain_result(f"❌ 格式错误：'{part}' 缺少 # 分隔符")
+                        yield event.plain_result(f"❌ 格式错误：'{line}' 缺少 # 分隔符")
                         return
-                if accounts:
-                    msg, count = await self._update_env_accounts(env_name, accounts)
-                    if "✅" in msg:
-                        yield event.plain_result(f"检测到 {count} 个账户，{msg}")
-                    else:
-                        yield event.plain_result(msg)
-                else:
-                    yield event.plain_result("❌ 未检测到有效的账户更新条目")
             else:
-                if '#' in raw:
-                    acc_val = raw.split('#', 1)
-                    acc = acc_val[0].strip()
-                    val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                    if acc and val:
-                        msg, count = await self._update_env_accounts(env_name, {acc: val})
-                        if "✅" in msg:
-                            yield event.plain_result(f"检测到 {count} 个账户，{msg}")
+                single = lines[0] if lines else raw
+                if '&' in single:
+                    parts = single.split('&')
+                    for part in parts:
+                        part = part.strip()
+                        if not part:
+                            continue
+                        if '#' in part:
+                            acc, val = part.split('#', 1)
+                            acc = acc.strip()
+                            val = val.strip()
+                            if acc and val:
+                                accounts[acc] = val
+                            else:
+                                yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
+                                return
                         else:
-                            yield event.plain_result(msg)
-                    else:
-                        msg = await self._set_env(env_name, raw)
-                        yield event.plain_result(msg)
+                            yield event.plain_result(f"❌ 格式错误：'{part}' 缺少 # 分隔符")
+                            return
                 else:
-                    msg = await self._set_env(env_name, raw)
+                    if '#' in single:
+                        acc, val = single.split('#', 1)
+                        acc = acc.strip()
+                        val = val.strip()
+                        if acc and val:
+                            accounts[acc] = val
+                        else:
+                            yield event.plain_result(f"❌ 格式错误：'{single}' 缺少账号或值")
+                            return
+                    else:
+                        msg = await self._set_env(env_name, single)
+                        yield event.plain_result(msg)
+                        return
+
+            if accounts:
+                msg, count = await self._update_env_accounts(env_name, accounts)
+                if "✅" in msg:
+                    yield event.plain_result(f"检测到 {count} 个账户，{msg}")
+                else:
                     yield event.plain_result(msg)
+            else:
+                yield event.plain_result("❌ 未检测到有效的账户更新条目")
         except Exception as e:
             logger.error(f"更新环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    @filter.command("更新变量")
-    async def update_env_new(self, event: AstrMessageEvent, env_name: str, new_value: str):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
+    async def _set_env_cmd(self, event: AstrMessageEvent, env_name: str, new_value: str):
         try:
             raw = new_value.replace('\n', '').replace('\r', '').strip()
-            if '&' in raw:
-                parts = raw.split('&')
-                accounts = {}
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-                    if '#' in part:
-                        acc_val = part.split('#', 1)
-                        acc = acc_val[0].strip()
-                        val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                        if acc and val:
-                            accounts[acc] = val
-                        else:
-                            yield event.plain_result(f"❌ 格式错误：'{part}' 缺少账号或值")
-                            return
-                    else:
-                        yield event.plain_result(f"❌ 格式错误：'{part}' 缺少 # 分隔符")
-                        return
-                if accounts:
-                    msg, count = await self._update_env_accounts(env_name, accounts)
-                    if "✅" in msg:
-                        yield event.plain_result(f"检测到 {count} 个账户，{msg}")
-                    else:
-                        yield event.plain_result(msg)
-                else:
-                    yield event.plain_result("❌ 未检测到有效的账户更新条目")
-            else:
-                if '#' in raw:
-                    acc_val = raw.split('#', 1)
-                    acc = acc_val[0].strip()
-                    val = acc_val[1].strip() if len(acc_val) > 1 else ''
-                    if acc and val:
-                        msg, count = await self._update_env_accounts(env_name, {acc: val})
-                        if "✅" in msg:
-                            yield event.plain_result(f"检测到 {count} 个账户，{msg}")
-                        else:
-                            yield event.plain_result(msg)
-                    else:
-                        msg = await self._set_env(env_name, raw)
-                        yield event.plain_result(msg)
-                else:
-                    msg = await self._set_env(env_name, raw)
-                    yield event.plain_result(msg)
+            msg = await self._set_env(env_name, raw)
+            yield event.plain_result(msg)
         except Exception as e:
-            logger.error(f"更新环境变量失败: {e}")
+            logger.error(f"覆盖环境变量失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    @filter.command("运行脚本")
-    async def run_script(self, event: AstrMessageEvent, script_path: str):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
+    async def _run_script_cmd(self, event: AstrMessageEvent, script_path: str):
         try:
             payload = {"path": script_path}
             result = await self._call_api("scripts/run", data=payload)
@@ -443,11 +390,7 @@ class DaidaiManagerPlugin(Star):
             logger.error(f"调用呆呆面板API失败: {e}")
             yield event.plain_result(f"❌ 请求失败：{str(e)}")
 
-    @filter.command("运行任务")
-    async def run_task(self, event: AstrMessageEvent, task_name: str):
-        if not self._is_admin(event):
-            yield event.plain_result("⚠️ 您没有权限使用此命令。")
-            return
+    async def _run_task_cmd(self, event: AstrMessageEvent, task_name: str):
         try:
             result = await self._call_api("tasks?page=1&page_size=100", method="GET")
             tasks = result.get("data")
