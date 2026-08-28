@@ -210,25 +210,22 @@ class DaidaiManagerPlugin(Star):
 ⚠️ 只有管理员QQ可使用所有命令。"""
 
     # ========== 纯文本入口：发送“呆呆管理”唤出菜单 ==========
-    @filter.message(关键字="呆呆管理")
+    @filter.regex(r'^呆呆管理$')
     async def daidai_menu(self, event: AstrMessageEvent):
         if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
         yield event.plain_result(self._get_help_text())
 
-    # ========== 统一消息处理器：解析以“呆呆”开头的命令 ==========
-    @filter.message()
+    # ========== 统一消息处理器：解析以“呆呆 ”开头的命令 ==========
+    @filter.regex(r'^呆呆 ')
     async def daidai_command_handler(self, event: AstrMessageEvent):
-        message = event.message_str.strip()
-        if not message.startswith("呆呆 "):
-            return
-
         if not self._is_admin(event):
             yield event.plain_result("⚠️ 您没有权限使用此命令。")
             return
 
-        content = message[3:].strip()
+        message = event.message_str.strip()
+        content = message[3:].strip()  # 去掉“呆呆 ”
         if not content:
             yield event.plain_result("❌ 请输入子命令，例如：呆呆 环境变量 列表")
             return
